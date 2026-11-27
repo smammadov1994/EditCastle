@@ -11,6 +11,7 @@
   <script src="/timeline-view.js" defer></script>
   <script src="/filmstrip.js" defer></script>
   <script src="/shortcuts.js" defer></script>
+  <script src="/magic-show.js" defer></script>
   <script src="/studio.js" defer></script>
 </head>
 <body>
@@ -37,6 +38,7 @@
       <button class="button" id="clip-commands" type="button" aria-haspopup="menu" aria-controls="clip-menu" aria-expanded="false">Clip</button>
       <button class="button" id="mark-commands" type="button" aria-haspopup="menu" aria-controls="clip-menu" aria-expanded="false">Mark</button>
       <button class="button" id="credit-button" type="button">Credits</button>
+      <span id="director-live" class="director-live" role="status"></span>
       <button class="button" id="toggle-director" type="button" aria-controls="director-panel" aria-expanded="true">Director</button>
       <button class="button" id="signout" type="button">Sign out</button>
       <details id="export-queue" class="project-menu" hidden>
@@ -50,8 +52,17 @@
     </div>
   </header>
   <main>
-    <section id="login" class="login panel" hidden>
+    <section id="login" class="login" hidden>
+      <div class="login-art" aria-hidden="true">
+        <div class="login-art-copy">
+          <p class="login-slate"><span></span>EditCastle Studio</p>
+          <p class="login-line">Say the film.<br>Watch it get made<i>.</i></p>
+        </div>
+      </div>
+      <div class="login-card">
+      <img class="login-mark" src="/studio-logo.png" alt="" width="40" height="40">
       <h1 id="login-title">Open your studio</h1>
+      <p class="login-lede">Your films, your timeline and Director, in the browser.</p>
       <p id="local-login-note" hidden>Enter the access key from the computer running EditCastle.</p>
       <form id="login-form" hidden>
         <label for="owner-key">Studio access key</label>
@@ -70,6 +81,7 @@
       <p id="account-status" role="status"></p>
       <a id="account-test-inbox" class="button" target="_blank" rel="noopener noreferrer" hidden>Open test inbox</a>
       <p id="login-error" class="error" role="status"></p>
+      </div>
     </section>
     <div id="studio" class="workspace" hidden>
       <section class="editing" aria-label="Video editor">
@@ -331,8 +343,8 @@
             <button id="provider-button" type="button" class="button" aria-label="Provider settings">⚙</button>
           </div>
         </div>
-        <div class="segmented" aria-label="Studio mode"><button class="button" id="director-mode" aria-pressed="true">Director</button><button class="button" id="quick-mode" aria-pressed="false">Quick Clips</button></div>
-        <div class="segmented providers" aria-label="Editing provider"><button class="button provider-tab" data-name="open_ai">ChatGPT</button><button class="button provider-tab" data-name="claude">Claude</button><button class="button provider-tab" data-name="local">Local</button></div>
+        <div class="segmented" aria-label="Studio mode" hidden><button class="button" id="director-mode" aria-pressed="true">Director</button><button class="button" id="quick-mode" aria-pressed="false">Quick Clips</button></div>
+        <div class="segmented providers" aria-label="Editing provider" hidden><button class="button provider-tab" data-name="open_ai">ChatGPT</button><button class="button provider-tab" data-name="claude">Claude</button><button class="button provider-tab" data-name="local">Local</button></div>
         <p id="agent-activity" class="agent-activity" role="status" hidden><strong id="agent-name"></strong><span id="agent-action"></span></p>
         <div id="conversation" class="conversation" role="log" aria-label="Director conversation"></div>
         <section id="recover-renders" class="run-plan" aria-label="Interrupted renders" hidden></section>
@@ -346,20 +358,37 @@
           <div id="run-plan" class="run-plan" hidden></div>
           <ol id="events"></ol>
         </section>
+        <section id="review-panel" class="review" aria-labelledby="review-title" hidden>
+          <div class="section-head"><h2 id="review-title">Review changes</h2><span id="review-count"></span></div>
+          <p class="review-note">Nothing is applied yet. Untick a change to leave it out.</p>
+          <ul id="review-list"></ul>
+          <div class="review-actions">
+            <button type="button" class="button" id="review-discard">Discard</button>
+            <button type="button" class="button primary" id="review-apply">Apply</button>
+          </div>
+        </section>
+        <section id="versions-panel" class="versions" aria-labelledby="versions-title" hidden>
+          <div class="section-head"><h2 id="versions-title">Versions</h2><button type="button" class="button" id="versions-close">Close</button></div>
+          <ul id="versions-list"></ul>
+        </section>
         <form id="prompt-form" class="composer">
           <div class="composer-head">
             <label for="prompt">What should we make?</label>
             <div class="composer-tools">
               <button type="button" class="button" id="prompt-ideas" aria-haspopup="menu" aria-expanded="false">Ideas</button>
               <button type="button" class="button" id="prompt-history" aria-haspopup="menu" aria-expanded="false">History</button>
+              <button type="button" class="button" id="versions-open" aria-controls="versions-panel" aria-expanded="false">Versions</button>
             </div>
           </div>
+          <div id="prompt-chips" class="prompt-chips" hidden></div>
           <textarea id="prompt" rows="3" maxlength="3000" aria-controls="mentions" aria-autocomplete="list" placeholder="Follow a paper boat under a bridge in three connected shots."></textarea>
           <div id="mentions" class="mentions" role="listbox" aria-label="Director references" hidden></div>
           <div class="composer-row">
             <label class="duration">Seconds per shot <input id="duration" type="number" min="1" max="15" step="0.1" placeholder="Auto"></label>
             <button type="submit" class="button primary" id="send">Send</button>
           </div>
+          <label class="review-setting"><input type="checkbox" id="review-first"> Review changes before applying</label>
+          <p id="run-estimate" class="run-estimate"></p>
           <p id="director-error" role="status" class="error"></p>
         </form>
       </aside>

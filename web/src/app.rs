@@ -498,6 +498,10 @@ fn workspace_routes(app: Shared) -> Router {
             get(|| async { js(include_str!("../static/shortcuts.js")) }),
         )
         .route(
+            "/magic-show.js",
+            get(|| async { js(include_str!("../static/magic-show.js")) }),
+        )
+        .route(
             "/studio.js",
             get(|| async { js(include_str!("../static/studio.js")) }),
         )
@@ -592,6 +596,12 @@ fn workspace_routes(app: Shared) -> Router {
             get(director_draft),
         )
         .route("/api/projects/{project}/director", post(start_run))
+        .route("/api/projects/{project}/director/review", post(review_run))
+        .route("/api/projects/{project}/indexing", get(indexing))
+        .route("/api/projects/{project}/versions/{version}", get(version_scene))
+        .route("/api/projects/{project}/versions/{version}/frame", get(version_frame))
+        .route("/api/projects/{project}/versions/{version}/restore", post(version_restore))
+        .route("/api/projects/{project}/versions/{version}/revert", post(version_revert))
         .route(
             "/api/projects/{project}/mcp-bundle",
             get(download_mcp_bundle),
@@ -1813,6 +1823,9 @@ struct Ask {
     #[serde(default)]
     quick: bool,
     playhead: Option<u32>,
+    /// Hold the finished draft for approval before it is applied.
+    #[serde(default)]
+    review: bool,
 }
 
 async fn start_run(
@@ -2098,7 +2111,7 @@ async fn run_auto_edit(
         event(app, id, activity)
     })
     .await?;
-    apply_local_plan(app, project, id, preview, plan).await
+    apply_local_plan(app, project, id, preview, plan, false).await
 }
 
 async fn apply_local_plan(
@@ -2107,7 +2120,9 @@ async fn apply_local_plan(
     id: Uuid,
     preview: &Feed,
     plan: auto_edit::Plan,
+    review: bool,
 ) -> Result<(Project, String)> {
+    let mut plan = plan;
     let mut edits = Vec::new();
     let mut before = &project;
     for (batch, stage) in plan.stages.iter().enumerate() {
@@ -2122,6 +2137,21 @@ async fn apply_local_plan(
         );
         before = &stage.project;
         tokio::time::sleep(Duration::from_millis(660)).await;
+    }
+    if review && let Some(stage) = plan.stages.last_mut() {
+        let all = visible_edits(&project, &stage.project, "edit", 0);
+        let rejected = await_review(app, id, &all).await?;
+        if !rejected.is_empty() {
+            revert_changes(&project.timeline, &project.sequence, &mut stage.project, &rejected);
+            stage
+                .project
+                .validate_timeline(&stage.project.timeline, stage.project.soundtrack)
+                .context("Those changes depend on each other. Approve or discard them together.")?;
+            edits = visible_edits(&project, &stage.project, "edit", 0)
+                .into_iter()
+                .take(40)
+                .collect();
+        }
     }
     let current = if let Some(stage) = plan.stages.into_iter().last() {
         app.store.update(|db| {
@@ -2139,10 +2169,12 @@ async fn apply_local_plan(
             current.sequence = stage.project.sequence;
             current.sequence.playhead = playhead;
             current.sequence.playing = false;
-            current.record(prior);
+            current.record(prior.clone());
             current.revision += 1;
+            record_version(current, id, prior);
             let saved = current.clone();
             if let Some(run) = db.runs.iter_mut().find(|run| run.id == id) {
+                run.studio_turn_mut().changes = edits.clone();
                 run.edits = edits;
             }
             Ok(saved)
@@ -2151,6 +2183,345 @@ async fn apply_local_plan(
         project
     };
     Ok((current, plan.summary))
+}
+
+/// Holds a finished draft until the person approves it. Returns the clips whose changes they struck.
+async fn await_review(app: &App, run: Uuid, edits: &[VisibleEdit]) -> Result<Vec<Uuid>> {
+    if edits.is_empty() {
+        return Ok(vec![]);
+    }
+    let (send, receive) = tokio::sync::oneshot::channel();
+    REVIEWS.lock().expect("reviews").insert(run, send);
+    app.store.update(|db| {
+        if let Some(record) = db.runs.iter_mut().find(|item| item.id == run) {
+            record.review = edits.iter().take(80).cloned().collect();
+        }
+        Ok(())
+    })?;
+    event(app, run, "Waiting for your review");
+    let preview = feed(app, run);
+    let decision = tokio::select! {
+        decision=receive=>decision.ok().flatten(),
+        _=async {
+            match &preview {
+                Some(feed)=>feed.closed().await,
+                None=>std::future::pending().await,
+            }
+        }=>None,
+        _=tokio::time::sleep(Duration::from_secs(30 * 60))=>None,
+    };
+    REVIEWS.lock().expect("reviews").remove(&run);
+    let _ = app.store.update(|db| {
+        if let Some(record) = db.runs.iter_mut().find(|item| item.id == run) {
+            record.review.clear();
+        }
+        Ok(())
+    });
+    check_stop(app, run)?;
+    decision.context("The edit was discarded. Nothing changed.")
+}
+
+#[derive(Deserialize)]
+struct ReviewInput {
+    run: Uuid,
+    approve: bool,
+    #[serde(default)]
+    rejected: Vec<Uuid>,
+}
+
+async fn review_run(
+    State(app): State<Shared>,
+    Path(project): Path<Uuid>,
+    Json(input): Json<ReviewInput>,
+) -> Api<StatusCode> {
+    let known = app.store.read(|db| {
+        db.runs
+            .iter()
+            .any(|run| run.id == input.run && run.project == project)
+    });
+    let sender = known
+        .then(|| REVIEWS.lock().expect("reviews").remove(&input.run))
+        .flatten()
+        .context("This edit is no longer waiting for review.")
+        .map_err(bad)?;
+    let _ = sender.send(input.approve.then_some(input.rejected));
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn placement_in(timeline: &[Clip], id: Uuid) -> Option<u32> {
+    let mut ends = HashMap::<String, u32>::new();
+    for clip in timeline {
+        let next = ends.entry(clip.track().to_owned()).or_default();
+        let at = clip.position.unwrap_or(*next);
+        if clip.id == id {
+            return Some(at);
+        }
+        *next = (*next).max(at.saturating_add(clip.duration()));
+    }
+    None
+}
+
+/// Takes single changes back: each listed clip or marker returns to how the base cut had it.
+fn revert_changes(
+    base: &[Clip],
+    base_sequence: &editor::Sequence,
+    changed: &mut Project,
+    rejected: &[Uuid],
+) {
+    for id in rejected {
+        let old = base.iter().position(|clip| clip.id == *id);
+        let new = changed.timeline.iter().position(|clip| clip.id == *id);
+        let restored = old.map(|index| {
+            let mut clip = base[index].clone();
+            clip.position = placement_in(base, *id);
+            clip
+        });
+        match (restored, new) {
+            (None, Some(index)) => {
+                changed.timeline.remove(index);
+            }
+            (Some(clip), Some(index)) => changed.timeline[index] = clip,
+            (Some(clip), None) => {
+                let index = old.unwrap_or(0).min(changed.timeline.len());
+                changed.timeline.insert(index, clip);
+            }
+            (None, None) => {
+                let was = base_sequence.markers.iter().find(|marker| marker.id == *id);
+                changed.sequence.markers.retain(|marker| marker.id != *id);
+                if let Some(marker) = was {
+                    changed.sequence.markers.push(marker.clone());
+                }
+            }
+        }
+    }
+}
+
+/// Keeps a Director edit as a version: the cut before it and the cut it left.
+fn record_version(current: &mut Project, run: Uuid, before: editor::Snapshot) {
+    let name = current
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.from == "you")
+        .map(|message| message.text.chars().take(80).collect::<String>())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "Director edit".into());
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| time.as_millis() as u64);
+    let after = current.snapshot();
+    current.versions.retain(|version| version.id != run);
+    current.versions.push(editor::Version {
+        id: run,
+        name,
+        at,
+        before,
+        after,
+    });
+    if current.versions.len() > 12 {
+        current.versions.remove(0);
+    }
+}
+
+#[derive(Deserialize)]
+struct VersionPick {
+    #[serde(default)]
+    before: bool,
+    at: Option<u32>,
+    clip: Option<Uuid>,
+}
+
+fn version_cut(db: &editor::Database, project: Uuid, version: Uuid, before: bool) -> Result<Project> {
+    let found = db
+        .projects
+        .iter()
+        .find(|item| item.id == project)
+        .context("That project is unavailable.")?;
+    let kept = found
+        .versions
+        .iter()
+        .find(|item| item.id == version)
+        .context("That version is no longer kept.")?;
+    let cut = if before { &kept.before } else { &kept.after };
+    let mut copy = found.clone();
+    copy.timeline = cut.timeline.clone();
+    copy.soundtrack = cut.soundtrack;
+    copy.sequence = cut.sequence.clone();
+    copy.sequence.playing = false;
+    copy.undo_steps.clear();
+    copy.redo_steps.clear();
+    copy.messages.clear();
+    Ok(copy)
+}
+
+async fn version_scene(
+    State(app): State<Shared>,
+    Path((project, version)): Path<(Uuid, Uuid)>,
+    Query(pick): Query<VersionPick>,
+) -> Api<Json<serde_json::Value>> {
+    let cut = app
+        .store
+        .read(|db| version_cut(db, project, version, pick.before))
+        .map_err(bad)?;
+    Ok(Json(json!({"base_revision":cut.revision,"scene":cut.public()})))
+}
+
+/// One picture of a kept version, or of the cut as it is now when the version id is nil.
+async fn version_frame(
+    State(app): State<Shared>,
+    Path((project, version)): Path<(Uuid, Uuid)>,
+    Query(pick): Query<VersionPick>,
+) -> Api<Response> {
+    let mut cut = app
+        .store
+        .read(|db| {
+            if version.is_nil() {
+                db.projects
+                    .iter()
+                    .find(|item| item.id == project)
+                    .cloned()
+                    .context("That project is unavailable.")
+            } else {
+                version_cut(db, project, version, pick.before)
+            }
+        })
+        .map_err(bad)?;
+    let step = cut.frame_step();
+    let duration = cut.duration();
+    if duration == 0 {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    let at = (pick.at.unwrap_or(0) / step * step).min((duration - 1) / step * step);
+    cut.sequence.in_point = Some(at);
+    cut.sequence.out_point = Some(at + step);
+    let work = media::temp(&app.store).await.map_err(internal)?;
+    let picture = async {
+        let options = media::ExportOptions {
+            height: Some(288),
+            include_audio: Some(false),
+            range_only: Some(true),
+            ..Default::default()
+        };
+        let rendered = media::export(&app.store, &cut, &work, &options).await?;
+        let file = work.join("frame.jpg");
+        media::extract(&rendered, 0, &file, true).await?;
+        Ok::<_, anyhow::Error>(tokio::fs::read(&file).await?)
+    }
+    .await;
+    let _ = tokio::fs::remove_dir_all(&work).await;
+    let bytes = picture.map_err(bad)?;
+    Ok((
+        [("content-type", "image/jpeg"), ("cache-control", "private, max-age=600")],
+        bytes,
+    )
+        .into_response())
+}
+
+fn no_active_run(db: &editor::Database, project: Uuid) -> Result<()> {
+    ensure!(
+        !db.runs
+            .iter()
+            .any(|run| run.project == project && run.pending()),
+        "Wait for Director to finish before changing versions."
+    );
+    Ok(())
+}
+
+async fn version_restore(
+    State(app): State<Shared>,
+    Path((project, version)): Path<(Uuid, Uuid)>,
+    Json(pick): Json<VersionPick>,
+) -> Api<StatusCode> {
+    app.store
+        .update(|db| {
+            no_active_run(db, project)?;
+            let cut = version_cut(db, project, version, pick.before)?;
+            cut.validate_timeline(&cut.timeline, cut.soundtrack)?;
+            let current = in_project(db, project)?;
+            let prior = current.snapshot();
+            let playhead = current.sequence.playhead;
+            current.timeline = cut.timeline;
+            current.soundtrack = cut.soundtrack;
+            current.sequence = cut.sequence;
+            current.sequence.playhead = playhead;
+            current.record(prior);
+            current.revision += 1;
+            Ok(())
+        })
+        .map_err(bad)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Takes back one change of a kept Director edit and keeps the rest of it.
+async fn version_revert(
+    State(app): State<Shared>,
+    Path((project, version)): Path<(Uuid, Uuid)>,
+    Json(pick): Json<VersionPick>,
+) -> Api<StatusCode> {
+    let clip = pick.clip.context("Choose a change to take back.").map_err(bad)?;
+    app.store
+        .update(|db| {
+            no_active_run(db, project)?;
+            let current = in_project(db, project)?;
+            let kept = current
+                .versions
+                .iter()
+                .find(|item| item.id == version)
+                .cloned()
+                .context("That version is no longer kept.")?;
+            let mut trial = current.clone();
+            revert_changes(&kept.before.timeline, &kept.before.sequence, &mut trial, &[clip]);
+            trial
+                .validate_timeline(&trial.timeline, trial.soundtrack)
+                .context("That change cannot be taken back on its own. Undo the whole edit instead.")?;
+            let prior = current.snapshot();
+            current.timeline = trial.timeline;
+            current.sequence.markers = trial.sequence.markers;
+            current.record(prior);
+            current.revision += 1;
+            let after = current.snapshot();
+            if let Some(kept) = current.versions.iter_mut().find(|item| item.id == version) {
+                kept.after = after;
+            }
+            for message in &mut current.messages {
+                if let Some(turn) = &mut message.studio
+                    && turn.id == version
+                {
+                    turn.changes.retain(|change| change.clip != clip);
+                }
+            }
+            Ok(())
+        })
+        .map_err(bad)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Media that background indexing has not finished: visual tags and speech transcripts.
+async fn indexing(
+    State(app): State<Shared>,
+    Path(project): Path<Uuid>,
+) -> Api<Json<serde_json::Value>> {
+    let sources = app
+        .store
+        .read(|db| {
+            db.projects
+                .iter()
+                .find(|item| item.id == project)
+                .map(|item| item.sources.clone())
+        })
+        .context("That project is unavailable.")
+        .map_err(bad)?;
+    let (sees, hears) = (crate::vision::available(), crate::speech::available());
+    let pending = sources
+        .iter()
+        .filter_map(|source| {
+            let tagging = sees && source.video && !crate::vision::indexed(&app.store, source);
+            let transcribing = hears && source.audio && !crate::speech::indexed(&app.store, source);
+            (tagging || transcribing)
+                .then(|| json!({"id":source.id,"tagging":tagging,"transcribing":transcribing}))
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(json!({"pending":pending})))
 }
 
 async fn stop_run(State(app): State<Shared>, Path(project): Path<Uuid>) -> Api<StatusCode> {
@@ -2234,6 +2605,7 @@ async fn director_draft(
         if let Some(activity) = current {
             if let Some(events) = activity {
                 view["activity_events"] = json!(events);
+                view["reply"] = json!(REPLY_DRAFTS.lock().expect("reply drafts").get(&query.run));
             }
             return Ok(Json(view));
         }
@@ -2264,7 +2636,34 @@ fn check_stop(app: &App, id: Uuid) -> Result<()> {
     Ok(())
 }
 
+/// Reply text a provider has streamed so far, per run. A message that starts with the record
+/// separator is a piece of that text and never an activity line.
+static REPLY_DRAFTS: std::sync::LazyLock<Mutex<HashMap<Uuid, String>>> =
+    std::sync::LazyLock::new(Default::default);
+/// Runs holding a finished draft until the person approves or discards it.
+type Decision = tokio::sync::oneshot::Sender<Option<Vec<Uuid>>>;
+static REVIEWS: std::sync::LazyLock<Mutex<HashMap<Uuid, Decision>>> =
+    std::sync::LazyLock::new(Default::default);
+
 fn event(app: &App, id: Uuid, text: impl Into<String>) {
+    let text = text.into();
+    {
+        let mut drafts = REPLY_DRAFTS.lock().expect("reply drafts");
+        if let Some(piece) = text.strip_prefix('\u{1e}') {
+            let draft = drafts.entry(id).or_default();
+            if draft.len() < 16_000 {
+                draft.push_str(piece);
+            }
+            drop(drafts);
+            if let Some(feed) = feed(app, id) {
+                feed.activity();
+            }
+            return;
+        }
+        if text != "Writing a response" {
+            drafts.remove(&id);
+        }
+    }
     if app
         .store
         .update(|db| {
@@ -2272,7 +2671,7 @@ fn event(app: &App, id: Uuid, text: impl Into<String>) {
                 if run.events.len() >= studio_history::MAX_EVENTS {
                     run.events.remove(0);
                 }
-                run.events.push(text.into());
+                run.events.push(text);
             }
             Ok(())
         })
@@ -2667,7 +3066,7 @@ async fn direct(
             result=async {
                 let plan=auto_edit::from_prompt(&app.store,project.clone(),&input.prompt,at,&selection,&work,
                     |activity|event(app,run,activity)).await?;
-                let (_,summary)=apply_local_plan(app,project.clone(),run,&preview,plan).await?;
+                let (_,summary)=apply_local_plan(app,project.clone(),run,&preview,plan,input.review).await?;
                 Ok(Message::new("director",summary))
             }=>result,
             _=preview.closed()=>Err(anyhow::anyhow!("Local stopped. The draft was discarded.")),
@@ -2717,6 +3116,7 @@ async fn direct(
                 current.timeline = draft.timeline;
                 current.revision += 1;
                 if let Some(run) = db.runs.iter_mut().find(|item| item.id == run) {
+                    run.studio_turn_mut().changes = edits.clone();
                     run.edits = edits;
                 }
                 Ok(())
@@ -3010,6 +3410,7 @@ async fn render_plan(
                 .collect();
         }
         if let Some(run) = db.runs.iter_mut().find(|item| item.id == run) {
+            run.studio_turn_mut().changes = edits.clone();
             run.edits = edits;
         }
         Ok(())
@@ -4761,6 +5162,21 @@ async fn agent_draft(
                     turn.citations.push(citation);
                 }
             }
+            if input.review && draft.changed {
+                let all = visible_edits(project, &draft.project, "edit", 0);
+                let rejected = await_review(app, run, &all).await?;
+                if !rejected.is_empty() {
+                    revert_changes(&project.timeline, &project.sequence, &mut draft.project, &rejected);
+                    draft
+                        .project
+                        .validate_timeline(&draft.project.timeline, draft.project.soundtrack)
+                        .context("Those changes depend on each other. Approve or discard them together.")?;
+                    draft.edits = visible_edits(project, &draft.project, "edit", 0)
+                        .into_iter()
+                        .take(40)
+                        .collect();
+                }
+            }
             draft.commit(project)?;
             return Ok(Message {
                 from: "director".into(),
@@ -4843,8 +5259,9 @@ impl EditDraft<'_> {
             }
             let prior = self.apply_library(current)?;
             self.project.undo_steps = current.undo_steps.clone();
-            self.project.record(prior);
+            self.project.record(prior.clone());
             sync_cut(current, self.project);
+            record_version(current, run, prior);
             current.validate_timeline(&current.timeline, current.soundtrack)?;
             let asset_ids = self
                 .generated
@@ -4853,6 +5270,7 @@ impl EditDraft<'_> {
                 .map(|source| source.id)
                 .collect();
             if let Some(run) = db.runs.iter_mut().find(|item| item.id == run) {
+                run.studio_turn_mut().changes = self.edits.clone();
                 run.edits = self.edits;
                 run.studio_turn_mut().asset_ids = asset_ids;
             }
@@ -5253,6 +5671,38 @@ impl EditDraft<'_> {
     }
 }
 
+/// The changes inside one clip that the browser performs as separate gestures.
+fn edit_detail(old: Option<&Clip>, new: &Clip) -> Option<serde_json::Value> {
+    let mut detail = serde_json::Map::new();
+    let fx = &new.effects;
+    let was = old.map(|clip| &clip.effects);
+    let gain = was.map_or(0.0, |fx| fx.gain_db);
+    if gain != fx.gain_db {
+        detail.insert("gain".into(), json!([gain, fx.gain_db]));
+    }
+    let fade_in = was.map_or(0, |fx| fx.fade_in_frames);
+    if fade_in != fx.fade_in_frames {
+        detail.insert("fade_in".into(), json!([fade_in, fx.fade_in_frames]));
+    }
+    let fade_out = was.map_or(0, |fx| fx.fade_out_frames);
+    if fade_out != fx.fade_out_frames {
+        detail.insert("fade_out".into(), json!([fade_out, fx.fade_out_frames]));
+    }
+    let transition = was.and_then(|fx| fx.transition.clone());
+    if transition != fx.transition {
+        detail.insert("transition".into(), json!([transition, fx.transition]));
+    }
+    let grade = was.map_or(serde_json::Value::Null, |fx| fx.grade.clone());
+    if grade != fx.grade {
+        detail.insert("grade".into(), json!([grade, fx.grade]));
+    }
+    let title = was.map_or("", |fx| fx.title.as_str());
+    if title != fx.title && !fx.title.is_empty() {
+        detail.insert("typed".into(), json!(fx.title));
+    }
+    (!detail.is_empty()).then(|| serde_json::Value::Object(detail))
+}
+
 fn visible_edits(
     before: &Project,
     after: &Project,
@@ -5286,6 +5736,7 @@ fn visible_edits(
                 before_width: None,
                 after_width: None,
                 ruler_item: None,
+                detail: None,
                 track_id: Some(track.id),
                 label: Some(match action {
                     "add_track" => format!("Added {}", track.name),
@@ -5337,9 +5788,10 @@ fn visible_edits(
                 source: (!clip.source.is_nil()).then_some(clip.source),
                 ruler_item: None,
                 track_id: None,
-                label: None,
+                label: Some(clip.name(after).to_owned()),
                 before_width: first.map(Clip::duration),
                 after_width: Some(clip.duration()),
+                detail: edit_detail(first, clip),
             });
         }
     }
@@ -5359,6 +5811,7 @@ fn visible_edits(
                 label: Some(clip.name(before).to_owned()),
                 before_width: Some(clip.duration()),
                 after_width: None,
+                detail: None,
             });
         }
     }
@@ -5376,6 +5829,7 @@ fn visible_edits(
         ruler_item: Some(kind.into()),
         track_id: None,
         label: Some(label),
+        detail: None,
     };
     for marker in &after.sequence.markers {
         let old = before.sequence.markers.iter().find(|m| m.id == marker.id);

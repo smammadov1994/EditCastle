@@ -12,15 +12,21 @@ soundtrack.preload = 'metadata';
 let shortcutStorage;
 try { shortcutStorage = window.localStorage; } catch (_) {}
 const shortcutPreferences = new StudioShortcuts.Preferences(shortcutStorage);
-const editorThemes = ['palenight','clay','auto','dark','grey','amber','light'];
+const editorThemes = ['pro','palenight','clay','auto','dark','grey','amber','light'];
 function displayPreference(name,fallback) {
   try { return localStorage.getItem('editroom.'+name) ?? fallback; } catch (_) { return fallback; }
 }
 function storeDisplayPreference(name,value) {
   try { localStorage.setItem('editroom.'+name,value); } catch (_) {}
 }
-let editorTheme=displayPreference('appearance','palenight');
-if (!editorThemes.includes(editorTheme)) editorTheme='palenight';
+let editorTheme=displayPreference('appearance','pro');
+// Pro is the studio's look now. Move anyone still on the old default over once; a later choice sticks.
+if (displayPreference('appearance-pro','')!=='seen') {
+  if (editorTheme==='palenight') editorTheme='pro';
+  storeDisplayPreference('appearance','pro'===editorTheme ? 'pro' : editorTheme);
+  storeDisplayPreference('appearance-pro','seen');
+}
+if (!editorThemes.includes(editorTheme)) editorTheme='pro';
 let timeStyle=displayPreference('time-style','timecode') === 'simple' ? 'simple' : 'timecode';
 let directorEnabled=displayPreference('director-enabled','true') === 'true';
 let directorPanelOpen=displayPreference('director-open','true') === 'true';
@@ -197,13 +203,13 @@ const time = ticks => (ticks / TICKS_PER_SECOND).toFixed(2);
 const sourceUrl = (route,id,version = source(id)?.version) => {
   const params=new URLSearchParams();
   if (version) params.set('v',version);
-  if (presentedFrame && !savedProject.sources.some(item=>item.id===id && item.version===version)) {
+  if (presentedFrame && !presentedFrame.peek && !savedProject.sources.some(item=>item.id===id && item.version===version)) {
     params.set('draft',presentedFrame.run);
   }
   return '/api/' + route + '/' + id + (params.size?'?'+params:'');
 };
 const mediaUrl = id => sourceUrl('media',id);
-const previewQuery = () => presentedFrame ? '?draft='+presentedFrame.run+'&frame='+presentedFrame.sequence : '';
+const previewQuery = () => presentedFrame && !presentedFrame.peek ? '?draft='+presentedFrame.run+'&frame='+presentedFrame.sequence : '';
 const clipAudioUrl = clip => clip.timed_audio
   ? projectUrl('/audio-preview/' + clip.id + '/' + clip.timed_audio + previewQuery())
   : mediaUrl(clip.source);
@@ -403,7 +409,9 @@ function renderStudio(nextState) {
   const direct = showDirectorWork && directorFrame && directorFrame.run===run?.id && run.status==='running' &&
     !run.stop_requested && stoppingRun!==run.id && directorFrame.base_revision===saved.revision ? directorFrame : null;
   const external = mcpFrame?.project===saved.id && mcpFrame.base_revision===saved.revision ? mcpFrame : null;
-  const frame=direct || external;
+  const peek = versionPeek?.project===saved.id && versionPeek.base_revision===saved.revision && run?.status!=='running' ? versionPeek : null;
+  if (versionPeek && !peek) versionPeek=null;
+  const frame=direct || external || peek;
   const openingDraft=frame && !presentedFrame;
   const leavingDraft=!frame && presentedFrame;
   if (openingDraft) previewSelection={id:saved.id,selected,ids:[...selection],at:frameAt,
@@ -464,7 +472,9 @@ function renderStudio(nextState) {
   editPane.inert=locked;
   timelineBody.dataset.draft=String(Boolean(frame));
   byId('draft-label').hidden=!frame;
-  byId('draft-label').textContent=external && frame===external ? 'Attached agent preview' : 'Director preview';
+  byId('draft-label').textContent=frame?.peek ? frame.label+' \u00b7 click to return'
+    : external && frame===external ? 'Attached agent preview' : 'Director preview';
+  byId('draft-label').dataset.peek=String(Boolean(frame?.peek));
   if (projectChanged) {
     directorAnimation?.abort();
     clearLibrarySkim(true);
@@ -531,7 +541,7 @@ function renderStudio(nextState) {
   renderActivity();
   observeDirectorDraft(run);
   observeMcp(saved.id);
-  if (queuedReplay) { const steps = queuedReplay; queuedReplay = null; replayDirectorEdits(steps); }
+  if (queuedReplay) { const steps = queuedReplay; queuedReplay = null; performDirectorEdits(steps); }
   if (fitCompletedDirector) { fitCompletedDirector=false; zoomTimeline(null); }
   renderCredits();
   renderSequenceOffer(saved, run?.status === 'running');
@@ -2390,8 +2400,134 @@ function messageBubble(message) {
   return bubble;
 }
 
+// What a run did to the timeline, as a change list: green for additions, red for removals,
+// amber for clips that were changed in place.
+let undoableRun=null;
+function describeChange(step) {
+  const place=[step.track_id ? '' : step.track,step.after!=null ? tc(step.after) : step.before!=null ? tc(step.before) : ''].filter(Boolean).join(' \u00b7 ');
+  if (step.track_id) return {fixed:true,kind:step.after==null ? 'remove' : step.before==null ? 'add' : 'change',name:step.label || step.track,place:'',notes:[]};
+  if (step.ruler_item) {
+    const name=step.ruler_item==='marker' ? 'Marker'+(step.label ? ' \u201c'+step.label+'\u201d' : '') : step.label || step.ruler_item;
+    return {id:step.ruler_item==='marker' ? step.clip : null,fixed:step.ruler_item!=='marker',at:step.after ?? step.before ?? 0,
+      kind:step.after==null ? 'remove' : step.before==null ? 'add' : 'change',name,place,notes:step.before!=null && step.after!=null ? ['Moved'] : []};
+  }
+  const name=step.label || source(step.source)?.title || 'Clip';
+  const middle=step.after!=null ? step.after+(step.after_width || 0)/2 : (step.before || 0)+(step.before_width || 0)/2;
+  if (step.before==null) return {id:step.clip,at:middle,kind:'add',name,place,notes:[Number(time(step.after_width))+' s'],clip:step.clip};
+  if (step.after==null) return {id:step.clip,at:middle,kind:'remove',name,place,notes:[Number(time(step.before_width || 0))+' s']};
+  const notes=[];
+  const detail=step.detail || {};
+  if (step.before_width!==step.after_width) notes.push('Trimmed '+Number(time(step.before_width))+' s \u2192 '+Number(time(step.after_width))+' s');
+  if (step.before!==step.after || (step.from_track && step.from_track!==step.track)) notes.push('Moved');
+  if (detail.gain) notes.push('Volume '+(detail.gain[1]<0 ? '\u2212' : '+')+Math.abs(Math.round(detail.gain[1]*10)/10)+' dB');
+  if (detail.fade_in) notes.push(detail.fade_in[1] ? 'Fade in' : 'Fade in removed');
+  if (detail.fade_out) notes.push(detail.fade_out[1] ? 'Fade out' : 'Fade out removed');
+  if (detail.grade) notes.push('Color');
+  if (detail.transition) notes.push(detail.transition[1] ? 'Transition' : 'Transition removed');
+  if (detail.typed) notes.push('Text');
+  if (!notes.length) notes.push('Adjusted');
+  return {id:step.clip,at:middle,kind:'change',name,place,notes,clip:step.clip};
+}
+// Rows for a list of changes, with several steps on one clip folded into one row.
+function changeRows(changes) {
+  const rows=[];
+  const byClip=new Map();
+  for (const step of changes) {
+    const row=describeChange(step);
+    const known=!step.track_id && !step.ruler_item && byClip.get(step.clip);
+    if (!known) {
+      rows.push(row);
+      if (!step.track_id && !step.ruler_item) byClip.set(step.clip,row);
+      continue;
+    }
+    if (row.kind==='remove') Object.assign(known,{kind:known.kind==='add' ? 'gone' : 'remove',notes:row.notes});
+    else known.notes=[...new Set([...known.notes,...row.notes])].filter((note,_,all)=>note!=='Adjusted' || all.length===1);
+  }
+  return rows.filter(row=>row.kind!=='gone');
+}
+function changeLine(row) {
+  const line=item('li',row.kind,'');
+  const sign=item('b','',row.kind==='add' ? '+' : row.kind==='remove' ? '\u2212' : '~');
+  sign.setAttribute('aria-hidden','true');
+  const words=item('span','','');
+  words.append(item('strong','',row.name),item('small','',[row.place,...row.notes].filter(Boolean).join(' \u00b7 ')));
+  line.append(sign,words);
+  line.setAttribute('aria-label',({add:'Added ',remove:'Removed ',change:'Changed '})[row.kind]+row.name);
+  return line;
+}
+function changeList(studio) {
+  const rows=changeRows(studio.changes);
+  if (!rows.length) return document.createDocumentFragment();
+  const box=item('section','change-list','');
+  box.setAttribute('aria-label','Timeline changes');
+  const head=item('header','','');
+  const count=kind=>rows.filter(row=>row.kind===kind).length;
+  for (const [kind,sign,word] of [['add','+','added'],['remove','\u2212','removed'],['change','~','changed']]) {
+    if (!count(kind)) continue;
+    const chip=item('span','change-count '+kind,sign+count(kind));
+    chip.title=count(kind)+' '+word;
+    chip.setAttribute('aria-label',count(kind)+' '+word);
+    head.append(chip);
+  }
+  if (undoableRun?.id===studio.id && undoableRun.revision===savedProject.revision && savedProject.canUndo) {
+    const undo=item('button','button change-undo','Undo');
+    undo.type='button';
+    undo.title='Undo this whole edit';
+    undo.onclick=()=>{
+      undoableRun=null;
+      byId('undo').click();
+    };
+    head.append(undo);
+  }
+  box.append(head);
+  const list=item('ul','','');
+  for (const row of rows.slice(0,8)) {
+    const line=changeLine(row);
+    const kept=savedProject.versions?.some(version=>version.id===studio.id);
+    if (row.id && (row.clip || kept)) {
+      line.tabIndex=0;
+      line.dataset.jump='true';
+      line.title=kept ? 'Show this change: before and after' : 'Select this clip';
+      const jump=event=>{
+        if (event.target.closest('button') || directorOwnsCut()) return;
+        if (row.clip && project.timeline.some(clip=>clip.id===row.clip)) {
+          selectClip(row.clip,{seek:false});
+          clipNode(row.clip)?.animate([{filter:'brightness(1)'},{filter:'brightness(2.1)'},{filter:'brightness(1)'}],{duration:700});
+        }
+        if (kept) compareChange(studio.id,row);
+      };
+      line.onclick=jump;
+      line.onkeydown=event=>{ if (event.key==='Enter') jump(event); };
+    }
+    if (kept && row.id && !row.fixed) {
+      const back=item('button','button change-back','\u21a9');
+      back.type='button';
+      back.title='Take back only this change';
+      back.setAttribute('aria-label','Take back '+row.name);
+      back.onclick=async()=>{
+        if (directorOwnsCut()) return status('Wait for Director to finish.');
+        back.disabled=true;
+        try {
+          await post(projectUrl('/versions/'+studio.id+'/revert'),{clip:row.id});
+          closeCompare();
+          await refresh();
+          status('Took back the change to '+row.name+'.');
+        } catch (error) {
+          back.disabled=false;
+          status(error.message);
+        }
+      };
+      line.append(back);
+    }
+    list.append(line);
+  }
+  box.append(list);
+  if (rows.length>8) box.append(item('p','change-more','and '+(rows.length-8)+' more'));
+  return box;
+}
 function studioTurnDetails(studio,expanded) {
   const nodes=[];
+  if (studio.changes?.length) nodes.push(changeList(studio));
   const detail=(kind,label)=>{
     const box=item('details','history-detail','');
     box.dataset.historyDetail=studio.id+'/'+kind;
@@ -2542,7 +2678,12 @@ function renderActivity() {
   const runPlan = byId('run-plan');
   const expanded = new Set([...byId('director-panel').querySelectorAll('details[data-history-detail][open]')]
     .map(box=>box.dataset.historyDetail));
-  const messages = JSON.stringify([project.id,project.revision,project.library_revision,project.sources.length,project.messages]);
+  const finished=state.runs.find(run=>run.project===projectId);
+  if (finished && finished.id===shownRun && finished.status!=='running' && finished.applied) {
+    undoableRun={id:finished.id,revision:savedProject.revision};
+  }
+  const messages = JSON.stringify([project.id,project.revision,project.library_revision,project.sources.length,project.messages,
+    undoableRun?.revision===savedProject.revision && savedProject.canUndo ? undoableRun.id : null]);
   if (conversation.dataset.content !== messages) {
     const scroll=conversation.scrollTop;
     const follow=conversation.scrollHeight-conversation.clientHeight-scroll<30;
@@ -2550,6 +2691,12 @@ function renderActivity() {
     conversation.replaceChildren(...bubbleList(project.messages,expanded));
     conversation.scrollTop = follow ? conversation.scrollHeight : scroll;
   }
+  typeLatestReply(conversation);
+  renderLiveReply(conversation);
+  renderReview();
+  renderEstimate();
+  renderVersions();
+  applyIndexBadges();
   const run = state.runs.find(run => run.project === projectId);
   elapsedRun=run;
   renderRunElapsed();
@@ -2564,7 +2711,25 @@ function renderActivity() {
   }
   const toggle=byId('toggle-director');
   toggle.dataset.busy=String(active);
-  toggle.setAttribute('aria-label',active ? 'Director, edit in progress' : 'Director');
+  const worker={claude:'Claude',chatgpt:'ChatGPT',local:'Local'}[state.provider] || 'Director';
+  const stoppable=active && !run.applied && !run.stop_requested && stoppingRun!==run.id;
+  toggle.dataset.working=String(stoppable);
+  toggle.dataset.worker=worker;
+  toggle.textContent=stoppable ? worker : 'Director';
+  toggle.setAttribute('aria-label',stoppable ? 'Stop '+worker : active ? 'Director, edit in progress' : 'Director');
+  const liveLine=byId('director-live');
+  const liveEvents=active ? (directorWatch?.run===run.id && directorWatch.events?.length ? directorWatch.events : run.events) : [];
+  const words=String(liveEvents.at(-1) || '');
+  const short=words.length>40 ? words.slice(0,40)+'\u2026' : words;
+  if (liveLine.dataset.words!==short) {
+    liveLine.dataset.words=short;
+    liveLine.classList.remove('shown');
+    clearTimeout(liveLine.timer);
+    liveLine.timer=setTimeout(()=>{
+      liveLine.textContent=short;
+      liveLine.classList.toggle('shown',Boolean(short));
+    },short && liveLine.textContent ? 100 : 0);
+  }
   const runPanel = byId('run-panel');
   runPanel.hidden = !run;
   if (run) {
@@ -2574,6 +2739,10 @@ function renderActivity() {
         else if (showDirectorWork && !previewedRuns.has(run.id)) queuedReplay=run.edits;
       }
       shownRun = null;
+    }
+    if (thinkingShow && (thinkingRun!==run.id || !active || run.stop_requested || stoppingRun===run.id)) {
+      if (queuedReplay && thinkingRun===run.id) thinkingShow.handOver();
+      else endThinking();
     }
     const events = byId('events');
     const live=directorWatch?.run===run.id ? directorWatch.events : null;
@@ -2585,6 +2754,7 @@ function renderActivity() {
     byId('stop-run').hidden = !active || run.applied;
     byId('stop-run').disabled = run.stop_requested || stoppingRun===run.id;
     if (active && (run.stop_requested || stoppingRun===run.id)) byId('run-status').textContent = 'Stopping';
+    else if (active && run.review?.length) byId('run-status').textContent = 'Waiting for review';
 
     if (events.dataset.content !== visible) {
       events.dataset.content = visible;
@@ -2649,8 +2819,8 @@ let mcpWatch = null;
 let mcpFrame = null;
 
 function agentColor(agent) {
-  if (agent.name==='Claude') return '#f0a175';
-  if (agent.name==='Codex' || agent.name==='ChatGPT') return '#75dbba';
+  if (agent.name==='Claude') return '#d97857';
+  if (agent.name==='Codex' || agent.name==='ChatGPT') return '#0fa380';
   return 'hsl('+[...agent.id].reduce((h,c)=>(31*h+c.charCodeAt(0))%360,0)+' 73% 72%)';
 }
 
@@ -2674,7 +2844,10 @@ function setAgentActivity(agent,label) {
 
 function agentCursor(agent) {
   const cursor=item('span','director-cursor agent-cursor','');
-  cursor.append(item('span','','➤'),item('b','',agent.name));
+  const arrow=item('span','','');
+  if (window.MagicShow) arrow.append(MagicShow.arrow(agentColor(agent)));
+  else arrow.textContent='➤';
+  cursor.append(arrow,item('b','',agent.action ? agent.name+' \u00b7 '+agent.action : agent.name));
   cursor.dataset.agent=agent.id;
   cursor.style.setProperty('--agent-color',agentColor(agent));
   cursor.setAttribute('aria-hidden','true');
@@ -2699,6 +2872,7 @@ function parkAgent(agent,cursor,x,y) {
   y=Math.max(4,Math.min(y,innerHeight-42));
   cursor.style.transform=cursorPosition(x,y);
   cursor.classList.add('agent-parked');
+  cursor.querySelector('b').textContent=agent.name;
   document.body.append(cursor);
   parkedAgents.set(agent.id,{cursor,x,y,timer:setTimeout(()=>releaseAgent(agent.id),agentLinger)});
 }
@@ -2788,7 +2962,7 @@ async function applyMcpEvent(watch,event,current) {
   watch.seen.add(edit);
   if (watch.seen.size>48) watch.seen.delete(watch.seen.values().next().value);
   setAgentActivity(agent,event.label);
-  await replayEdits(frame.edits,watch.controller.signal,agent);
+  await replayEdits(frame.edits,watch.controller.signal,{...agent,action:event.label});
 }
 
 function closeDirectorPreview() {
@@ -2806,6 +2980,7 @@ function observeDirectorDraft(run) {
   closeDirectorPreview();
   const watcher={run:run.id,project:projectId,controller:new AbortController()};
   directorWatch=watcher;
+  beginThinking(run);
   watchDirectorDraft(watcher);
 }
 
@@ -2820,12 +2995,18 @@ async function watchDirectorDraft(watcher) {
       if (packet.activity_events) {
         activity=packet.activity_version;
         watcher.events=packet.activity_events;
+        watcher.reply=packet.reply || '';
+        noteThinking(packet.activity_events);
         renderActivity();
       }
       for (const event of packet.frames) {
         if (signal.aborted || projectId!==editor) return;
         after=event.sequence;
         if (savedProject.revision!==event.base_revision) continue;
+        if (thinkingShow && thinkingRun===run) {
+          sketchDraft(event.edits);
+          continue;
+        }
         directorFrame={...event,run};
         if (!showDirectorWork) continue;
         renderStudio(state);
@@ -2893,6 +3074,7 @@ function selectClip(id,{extend = false,keep = false,seek = true} = {}) {
   }
 }
 function updateSelection() {
+  renderPromptChips();
   const clip = currentClip();
   byId('remove').disabled = !libraryPickCount() && !linkedSelection(selection).length && !captionSelection.size;
   if (sourcePreview) return;
@@ -5579,10 +5761,12 @@ byId('prompt-form').onsubmit = async event => {
   savePromptDraft(draft,editor);
   try {
     const run = await post(projectUrl('/director'), { prompt, selected, selected_clips:[...selection],
-      selected_media:pickedMedia(), duration:duration ? Number(duration) : null, quick, playhead:frameAt });
+      selected_media:pickedMedia(), duration:duration ? Number(duration) : null, quick, playhead:frameAt,
+      review:reviewFirst && !quick });
     if (sessionStorage.getItem(promptDraftKey(editor))===draft) savePromptDraft('',editor);
     if (projectId===editor) {
       shownRun = run.id;
+      typedPending = run.id;
       if (input.value===draft) {
         input.value='';
         closeMentions();
@@ -6557,6 +6741,8 @@ function updateDirectorPanel() {
 }
 updateDirectorPanel();
 byId('toggle-director').onclick = () => {
+  // While a run works, the button is its Stop control, as in Editroom.
+  if (byId('toggle-director').dataset.working==='true') return byId('stop-run').click();
   directorPanelOpen=!directorPanelOpen;
   updateDirectorPanel();
   storeDisplayPreference('director-open',String(directorPanelOpen));
@@ -7113,6 +7299,831 @@ document.addEventListener('keydown', event => {
   if (action) {event.preventDefault();action();}
 });
 mode(false);
+
+// ── Director, beyond the show ────────────────────────────────────────────────
+let reviewFirst=displayPreference('director-review','true')==='true';
+let versionPeek=null;
+let reviewShown=null;
+const reviewKept=new Set();
+byId('review-first').checked=reviewFirst;
+byId('review-first').onchange=event=>{
+  reviewFirst=event.target.checked;
+  storeDisplayPreference('director-review',String(reviewFirst));
+};
+
+// Review before applying: the finished draft waits as a checklist. Unticked rows are left out.
+function renderReview() {
+  const panel=byId('review-panel');
+  const run=state.runs.find(run=>run.project===projectId && run.status==='running' && run.review?.length && !run.stop_requested);
+  panel.hidden=!run;
+  if (!run) {
+    reviewShown=null;
+    return;
+  }
+  const rows=changeRows(run.review);
+  if (reviewShown!==run.id) {
+    reviewShown=run.id;
+    reviewKept.clear();
+    rows.forEach((row,index)=>reviewKept.add(index));
+    thinkingShow?.handOver();
+    byId('review-apply').disabled=byId('review-discard').disabled=false;
+  }
+  const list=byId('review-list');
+  const key=run.id+':'+rows.length;
+  if (list.dataset.content!==key) {
+    list.dataset.content=key;
+    list.replaceChildren(...rows.map((row,index)=>{
+      const line=changeLine(row);
+      const box=item('input','','');
+      box.type='checkbox';
+      box.checked=true;
+      box.disabled=!row.id || row.fixed;
+      box.setAttribute('aria-label','Keep '+row.name);
+      box.onchange=()=>{
+        if (box.checked) reviewKept.add(index);
+        else reviewKept.delete(index);
+        line.dataset.struck=String(!box.checked);
+        countReview(rows);
+      };
+      line.prepend(box);
+      return line;
+    }));
+  }
+  countReview(rows);
+  const decide=approve=>async()=>{
+    byId('review-apply').disabled=byId('review-discard').disabled=true;
+    const rejected=approve ? rows.filter((row,index)=>!reviewKept.has(index) && row.id).map(row=>row.id) : [];
+    try {
+      await post(projectUrl('/director/review'),{run:run.id,approve,rejected});
+      if (!approve) endThinking();
+      await refresh();
+    } catch (error) {
+      byId('review-apply').disabled=byId('review-discard').disabled=false;
+      byId('director-error').textContent=error.message;
+    }
+  };
+  byId('review-apply').onclick=decide(true);
+  byId('review-discard').onclick=decide(false);
+}
+function countReview(rows) {
+  const kept=rows.filter((row,index)=>reviewKept.has(index)).length;
+  byId('review-count').textContent=kept+' of '+rows.length;
+  byId('review-apply').textContent=kept===rows.length ? 'Apply all '+kept : kept ? 'Apply '+kept : 'Apply none';
+}
+
+// Before and after of one change, side by side over the viewer.
+let compareBox=null;
+function closeCompare() {
+  compareBox?.remove();
+  compareBox=null;
+}
+function compareChange(version,row) {
+  closeCompare();
+  const box=item('div','change-compare','');
+  compareBox=box;
+  const at=Math.max(0,Math.round(row.at || 0));
+  for (const [label,before] of [['Before',true],['After',false]]) {
+    const side=item('figure','','');
+    side.dataset.loading='true';
+    const picture=new Image();
+    picture.alt=label+' '+row.name;
+    picture.onload=()=>{ delete side.dataset.loading; };
+    picture.onerror=()=>{ delete side.dataset.loading; side.dataset.empty='true'; };
+    picture.src=projectUrl('/versions/'+version+'/frame?at='+at+(before ? '&before=true' : ''));
+    side.append(picture,item('figcaption','',label));
+    box.append(side);
+  }
+  const head=item('header','','');
+  head.append(item('strong','',row.name),item('span','',tc(at)));
+  const close=item('button','button','Close');
+  close.type='button';
+  close.onclick=closeCompare;
+  head.append(close);
+  box.prepend(head);
+  byId('viewer-picture').append(box);
+}
+addEventListener('keydown',event=>{
+  if (event.key==='Escape' && compareBox) closeCompare();
+});
+
+// Versions: every Director edit keeps the cut before and after it.
+function renderVersions() {
+  const versions=savedProject.versions || [];
+  byId('versions-open').disabled=!versions.length;
+  byId('versions-open').textContent=versions.length ? 'Versions '+versions.length : 'Versions';
+  const panel=byId('versions-panel');
+  if (!versions.length) panel.hidden=true;
+  if (panel.hidden) return;
+  const list=byId('versions-list');
+  const key=JSON.stringify([versions,savedProject.revision,versionPeek?.run,versionPeek?.before]);
+  if (list.dataset.content===key) return;
+  list.dataset.content=key;
+  const ago=at=>{
+    const minutes=Math.max(0,Math.round((Date.now()-at)/60000));
+    return minutes<1 ? 'just now' : minutes<60 ? minutes+' min ago' : minutes<1440 ? Math.round(minutes/60)+' h ago' : Math.round(minutes/1440)+' d ago';
+  };
+  list.replaceChildren(...versions.map((version,index)=>{
+    const line=item('li','','');
+    const words=item('div','','');
+    words.append(item('strong','',version.name),item('small','','Version '+(versions.length-index)+' · '+ago(version.at)+' · '+version.was+' → '+version.clips+' clips'));
+    const tools=item('div','version-tools','');
+    for (const [label,before] of [['View before',true],['View after',false]]) {
+      const view=item('button','button',label);
+      view.type='button';
+      view.setAttribute('aria-pressed',String(versionPeek?.run===version.id && versionPeek.before===before));
+      view.onclick=()=>peekVersion(version,before);
+      tools.append(view);
+    }
+    const restore=item('button','button','Restore before');
+    restore.type='button';
+    restore.title='Bring the cut back to how it was before this edit';
+    restore.onclick=()=>restoreVersion(version,true);
+    const again=item('button','button','Restore after');
+    again.type='button';
+    again.title='Bring the cut back to how this edit left it';
+    again.onclick=()=>restoreVersion(version,false);
+    tools.append(restore,again);
+    line.append(words,tools);
+    return line;
+  }));
+}
+async function peekVersion(version,before) {
+  if (directorOwnsCut()) return status('Wait for Director to finish.');
+  if (versionPeek?.run===version.id && versionPeek.before===before) return leavePeek();
+  try {
+    const view=await api(projectUrl('/versions/'+version.id+(before ? '?before=true' : '')));
+    versionPeek={scene:view.scene,base_revision:savedProject.revision,project:projectId,run:version.id,sequence:0,edits:[],
+      external:true,peek:true,before,label:(before ? 'Before: ' : 'After: ')+version.name};
+    renderStudio(state);
+  } catch (error) {
+    status(error.message);
+  }
+}
+function leavePeek() {
+  if (!versionPeek) return;
+  versionPeek=null;
+  renderStudio(state);
+}
+async function restoreVersion(version,before) {
+  if (directorOwnsCut()) return status('Wait for Director to finish.');
+  versionPeek=null;
+  try {
+    await post(projectUrl('/versions/'+version.id+'/restore'),{before});
+    await refresh();
+    status('Restored the cut '+(before ? 'from before' : 'from after')+' “'+version.name+'”. Undo brings the current cut back.');
+  } catch (error) {
+    status(error.message);
+  }
+}
+byId('versions-open').onclick=()=>{
+  const panel=byId('versions-panel');
+  panel.hidden=!panel.hidden;
+  byId('versions-open').setAttribute('aria-expanded',String(!panel.hidden));
+  if (panel.hidden) leavePeek();
+  else {
+    byId('versions-list').dataset.content='';
+    renderVersions();
+  }
+};
+byId('versions-close').onclick=()=>byId('versions-open').click();
+byId('draft-label').onclick=()=>{ if (byId('draft-label').dataset.peek==='true') leavePeek(); };
+
+// What the prompt will act on, shown as chips above the box.
+function renderPromptChips() {
+  const chips=[];
+  const clips=selection.size;
+  const media=libraryPickCount();
+  if (clips) chips.push(clips===1 ? '1 clip selected' : clips+' clips selected');
+  if (media) chips.push(media===1 ? '1 media item selected' : media+' media items selected');
+  const box=byId('prompt-chips');
+  const key=chips.join('|');
+  if (box.dataset.content===key) return;
+  box.dataset.content=key;
+  box.hidden=!chips.length;
+  box.replaceChildren(...chips.map(text=>item('span','prompt-chip',text)));
+  if (chips.length) box.append(item('small','','Director works on these. Type @ to point at something else.'));
+}
+
+// Open the Director with a prompt, from a clip menu or the keyboard.
+function askDirector(text,send) {
+  if (!directorEnabled) return;
+  if (!directorPanelOpen) {
+    directorPanelOpen=true;
+    updateDirectorPanel();
+    storeDisplayPreference('director-open','true');
+  }
+  const prompt=byId('prompt');
+  if (text!=null) {
+    prompt.value=text;
+    prompt.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  prompt.focus();
+  prompt.setSelectionRange(prompt.value.length,prompt.value.length);
+  if (send && !directorBusy()) byId('prompt-form').requestSubmit();
+}
+addEventListener('keydown',event=>{
+  if (event.key.toLowerCase()!=='k' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+  if (byId('studio').hidden || document.querySelector('dialog[open]')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  askDirector(null,false);
+},true);
+
+// What a run will cost and how long the last one took, before Send.
+function renderEstimate() {
+  const seconds=Number(byId('duration').value);
+  const parts=['Editing your footage is free'];
+  parts.push('new shots cost 1 credit per second'+(seconds ? ', about '+Math.ceil(seconds)+' per shot' : ', up to 15 per shot'));
+  if (Number.isFinite(state.available)) parts.push(state.available+' credits left');
+  const done=state.runs.filter(run=>run.project===projectId && run.status!=='running' && Number.isFinite(run.started_at) && Number.isFinite(run.finished_at)).at(-1);
+  if (done) parts.push('last run took '+Math.max(1,Math.round(done.finished_at-done.started_at))+' s');
+  const text=parts.join(' · ')+'.';
+  if (byId('run-estimate').textContent!==text) byId('run-estimate').textContent=text;
+}
+byId('duration').addEventListener('input',()=>{ if (state) renderEstimate(); });
+
+// Reply text as it is written. A provider that streams fills the bubble piece by piece; a reply
+// that arrives whole is revealed word by word.
+let typedReply=null;
+function renderLiveReply(conversation) {
+  const run=state.runs.find(run=>run.project===projectId && run.status==='running');
+  const text=run && directorWatch?.run===run.id ? directorWatch.reply || '' : '';
+  let bubble=conversation.querySelector('.bubble.streaming-live');
+  if (!text) {
+    bubble?.remove();
+    return;
+  }
+  const follow=conversation.scrollHeight-conversation.clientHeight-conversation.scrollTop<40;
+  if (!bubble) {
+    bubble=item('p','bubble director-msg streaming streaming-live','');
+    bubble.setAttribute('aria-live','off');
+    conversation.append(bubble);
+  }
+  if (bubble.textContent!==text) bubble.textContent=text;
+  if (follow) conversation.scrollTop=conversation.scrollHeight;
+  typedReply=run.id;
+}
+function typeLatestReply(conversation) {
+  const last=project.messages.at(-1);
+  const run=state.runs.find(run=>run.project===projectId);
+  if (!last || last.from==='you' || !last.text || last.citations?.length || !run || run.status==='running') return;
+  if (run.id!==shownRun && run.id!==typedPending) return;
+  if (typedReply===run.id || calmMotion()) {
+    typedReply=run.id;
+    return;
+  }
+  typedReply=run.id;
+  const words=last.text.split(/(\s+)/);
+  let shown=0;
+  // The conversation can be drawn again while the reply is appearing, so each step finds the
+  // bubble afresh instead of holding on to one element.
+  const step=()=>{
+    const bubble=[...conversation.querySelectorAll('.bubble.director-msg:not(.streaming-live)')].at(-1);
+    if (!bubble || project.messages.at(-1)?.text!==last.text) return;
+    shown=Math.min(words.length,shown+Math.max(2,Math.ceil(words.length/60)));
+    bubble.textContent=words.slice(0,shown).join('');
+    bubble.classList.toggle('streaming',shown<words.length);
+    conversation.scrollTop=conversation.scrollHeight;
+    if (shown<words.length) setTimeout(step,45);
+  };
+  step();
+}
+let typedPending=null;
+
+// Background analysis made visible: tiles show when a file is being tagged or transcribed.
+let indexPending=new Map();
+let indexTimer=null;
+async function watchIndexing() {
+  clearTimeout(indexTimer);
+  const editor=projectId;
+  try {
+    if (editor && !byId('studio').hidden && !document.hidden) {
+      const view=await api(projectUrl('/indexing'));
+      if (projectId===editor) {
+        indexPending=new Map(view.pending.map(entry=>[entry.id,entry]));
+        applyIndexBadges();
+      }
+    }
+  } catch (_) {}
+  indexTimer=setTimeout(watchIndexing,indexPending.size ? 3000 : 15000);
+}
+function applyIndexBadges() {
+  for (const tile of document.querySelectorAll('#media-list [data-asset]')) {
+    const entry=indexPending.get(tile.dataset.asset);
+    const label=entry ? [entry.tagging && 'Tagging',entry.transcribing && 'Transcribing'].filter(Boolean).join(' · ') : '';
+    if (label) tile.dataset.indexing=label;
+    else delete tile.dataset.indexing;
+  }
+}
+watchIndexing();
+
+// The Director show. While a run works, the timeline stays as saved and a thinking overlay scans
+// the media and sketches the coming cut. When the run lands, a swarm of cursors performs it.
+let thinkingShow=null;
+let thinkingRun=null;
+let thinkingNoted=0;
+let swarmShow=null;
+const calmMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+const laneNamed=name=>[...timelineBody.querySelectorAll('[data-track]')].find(node=>node.dataset.track===name);
+const clipNode=id=>[...timelineBody.querySelectorAll('[data-clip]')].find(node=>node.dataset.clip===id);
+const tileNode=id=>[...document.querySelectorAll('#media-list [data-asset]')].find(node=>node.dataset.asset===id);
+function within(rect,frame) {
+  return rect.width>0 && rect.right>frame.left+2 && rect.left<frame.right-2 && rect.bottom>frame.top+2 && rect.top<frame.bottom-2;
+}
+function clipped(rect,frame) {
+  const left=Math.max(rect.left,frame.left);
+  const top=Math.max(rect.top,frame.top);
+  return {left,top,width:Math.min(rect.right,frame.right)-left,height:Math.min(rect.bottom,frame.bottom)-top};
+}
+function thinkingTargets(stage) {
+  const list=byId('media-list').getBoundingClientRect();
+  const tiles=[...document.querySelectorAll('#media-list [data-asset]')].map(node=>({key:'asset:'+node.dataset.asset,rect:node.getBoundingClientRect()}))
+    .filter(target=>within(target.rect,list)).map(target=>({...target,rect:clipped(target.rect,list)}));
+  if (stage==='looking') return tiles;
+  const body=timelineBody.getBoundingClientRect();
+  const clips=[...timelineBody.querySelectorAll('[data-clip]')].map(node=>({key:'clip:'+node.dataset.clip,rect:node.getBoundingClientRect()}))
+    .filter(target=>within(target.rect,body)).map(target=>({...target,rect:clipped(target.rect,body)}));
+  return [...clips,...tiles,{key:'viewer',rect:byId('viewer-picture').getBoundingClientRect()}];
+}
+function beginThinking(run) {
+  if (thinkingRun===run.id || !showDirectorWork || calmMotion() || !window.MagicShow) return;
+  endThinking();
+  swarmShow?.skip();
+  thinkingRun=run.id;
+  thinkingNoted=0;
+  const tint={claude:[217,120,87],chatgpt:[15,163,128]}[state.provider] || [242,242,242];
+  thinkingShow=MagicShow.thinking({tint,targets:thinkingTargets,
+    viewer:()=>byId('viewer-picture').getBoundingClientRect(),
+    cutouts:()=>[{rect:byId('director-panel').getBoundingClientRect(),radius:18},
+      {rect:byId('toggle-director').getBoundingClientRect(),radius:99,grow:3}]});
+}
+function endThinking() {
+  thinkingShow?.end();
+  thinkingShow=null;
+  thinkingRun=null;
+}
+function noteThinking(events) {
+  if (!thinkingShow) return;
+  for (const event of events.slice(thinkingNoted)) {
+    const text=String(event);
+    if (/plac|trim|mov|split|grad|mix|transition|title|remov|delet|arrang|mark|laying|applying/i.test(text)) thinkingShow.advance('thinking');
+    else if (/review|analy|check|look|read|study|search|listen|transcri|finding|choosing/i.test(text)) {
+      thinkingShow.advance('analyzing');
+      const named=savedProject.sources.filter(asset=>asset.title && text.includes(asset.title)).sort((a,b)=>b.title.length-a.title.length)[0];
+      if (named) {
+        thinkingShow.focus('asset:'+named.id);
+        for (const clip of savedProject.timeline) if (clip.source===named.id) thinkingShow.focus('clip:'+clip.id);
+      } else thinkingShow.focus('viewer');
+    }
+  }
+  thinkingNoted=events.length;
+}
+function sketchDraft(edits) {
+  thinkingShow.advance('thinking');
+  for (const step of edits) {
+    if (step.after==null || step.track_id || step.ruler_item || !step.after_width) continue;
+    const {track,after,after_width:width}=step;
+    thinkingShow.plan(step.clip,()=>{
+      const lane=laneNamed(track)?.getBoundingClientRect();
+      const body=timelineBody.getBoundingClientRect();
+      if (!lane) return null;
+      const rect={left:lane.left+after*pxPerTick,top:lane.top,width:width*pxPerTick,height:lane.height};
+      rect.right=rect.left+rect.width;
+      rect.bottom=rect.top+rect.height;
+      return within(rect,body) ? clipped(rect,body) : null;
+    });
+  }
+}
+function swarmTasks(steps) {
+  const show=thinkingShow;
+  const places=steps.filter(step=>step.before==null && step.after!=null && !step.ruler_item && !step.track_id).sort((a,b)=>a.after-b.after);
+  const removals=steps.some(step=>step.after==null);
+  const shifts=steps.some(step=>step.before!=null && step.after!=null && (step.before!==step.after || step.before_width!==step.after_width));
+  const overlay=item('div','magic-swarm','');
+  overlay.setAttribute('aria-hidden','true');
+  document.body.append(overlay);
+  const tasks=steps.map(step=>{
+    const lane=()=>(step.ruler_item ? byId('ruler') : step.track_id
+      ? timelineBody.querySelector('[data-track-header="'+step.track_id+'"]') : laneNamed(step.track))?.getBoundingClientRect();
+    const at=(ticks,box)=>box.left+ticks*pxPerTick;
+    const middle=box=>box.top+box.height/2;
+    const node=()=>clipNode(step.clip);
+    const mark=(...names)=>({begin:()=>node()?.classList.add('magic-hot',...names),cool:()=>node()?.classList.remove('magic-hot',...names)});
+    if (step.ruler_item || step.track_id) {
+      return {kind:'change',label:step.label || 'Edit',delay:.6+Math.random()*.4,points:()=>{
+        const box=lane();
+        if (!box) return null;
+        const spot={x:step.track_id ? box.left+Math.min(box.width/2,60) : at(step.after ?? step.before ?? 0,box),y:middle(box)};
+        return {grab:spot,release:spot};
+      }};
+    }
+    if (step.after==null) {
+      let block;
+      return {kind:'remove',label:'Delete',delay:Math.random()*.2,points:()=>{
+        const box=laneNamed(step.from_track || step.track)?.getBoundingClientRect() || timelineBody.getBoundingClientRect();
+        const width=(step.before_width || 0)*pxPerTick;
+        const spot={x:at(step.before || 0,box)+width/2,y:middle(box)};
+        if (!block) {
+          block=item('span','magic-removed',step.label || '');
+          Object.assign(block.style,{left:at(step.before || 0,box)+'px',top:box.top+1+'px',width:Math.max(6,width)+'px',height:box.height-2+'px'});
+          overlay.append(block);
+        }
+        return {grab:spot,release:spot};
+      },finish:()=>block?.remove()};
+    }
+    if (step.before==null) {
+      const asset=source(step.source);
+      const order=places.indexOf(step);
+      const tile=()=>{
+        const found=tileNode(step.source)?.getBoundingClientRect();
+        const list=byId('media-list').getBoundingClientRect();
+        if (found && within(found,list)) return found;
+        return {left:list.left+list.width/2-32,top:found && found.top>list.bottom ? list.bottom-30 : list.top+2,width:64,height:36};
+      };
+      const start=tile();
+      return {kind:'place',label:asset && asset.audio && !asset.video ? 'Music' : 'Place',
+        delay:(removals || shifts ? .5 : 0)+order*.09+Math.random()*.25,
+        carry:{from:{width:start.width,height:start.height},
+          to:{width:Math.min(Math.max(8,step.after_width*pxPerTick),260),height:(laneNamed(step.track)?.getBoundingClientRect().height || 40)-2},
+          image:asset?.video ? sourceUrl('thumb',asset.id,asset.version) : ''},
+        points:()=>{
+          const box=lane();
+          if (!box) return null;
+          const from=tile();
+          return {grab:{x:from.left+from.width/2,y:from.top+from.height/2},
+            release:{x:at(step.after,box)+Math.min(step.after_width*pxPerTick,260)*.3,y:middle(box)}};
+        },
+        begin:()=>{},
+        finish:()=>{
+          node()?.classList.remove('magic-waiting');
+          node()?.classList.add('magic-hot');
+          show?.landed(step.clip);
+        },
+        cool:()=>node()?.classList.remove('magic-hot')};
+    }
+    const [before,after,oldWidth,newWidth]=[step.before,step.after,step.before_width ?? step.after_width,step.after_width];
+    const moved=before!==after || (step.from_track && step.from_track!==step.track);
+    const sized=oldWidth!==newWidth;
+    if (!moved && !sized) {
+      return {plain:true,kind:'change',label:'Edit',delay:(places.length ? 1 : .3)+Math.random()*.5,...mark(),points:()=>{
+        const box=lane();
+        if (!box) return null;
+        const spot={x:at(after,box)+Math.min(newWidth*pxPerTick/2,80),y:middle(box)};
+        return {grab:spot,release:spot};
+      }};
+    }
+    const head=sized && before!==after && before+oldWidth===after+newWidth;
+    const tail=sized && before===after;
+    const rise=()=>{
+      const from=laneNamed(step.from_track || step.track)?.getBoundingClientRect();
+      const to=lane();
+      return from && to ? from.top-to.top : 0;
+    };
+    const pose=u=>{
+      const clip=node();
+      if (!clip) return;
+      if (u>=1) {
+        clip.style.transform='';
+        clip.style.width=clip.dataset.magicWidth ?? clip.style.width;
+        delete clip.dataset.magicWidth;
+        return;
+      }
+      clip.dataset.magicWidth ??= clip.style.width;
+      clip.style.transform='translate('+(before-after)*pxPerTick*(1-u)+'px,'+(u<.5 ? rise() : 0)+'px)';
+      if (sized) clip.style.width=Math.max(2,(oldWidth+(newWidth-oldWidth)*u)*pxPerTick)+'px';
+    };
+    return {kind:head || tail ? 'trim' : 'move',label:head || tail || !moved ? 'Trim' : 'Move',delay:.15+Math.random()*.4,
+      ...mark(head ? 'magic-trim-head' : tail ? 'magic-trim-tail' : 'magic-moving'),apply:pose,finish:()=>pose(1),
+      points:()=>{
+        const box=lane();
+        if (!box) return null;
+        const y=middle(box);
+        if (tail) return {grab:{x:at(before+oldWidth,box),y},release:{x:at(after+newWidth,box),y}};
+        if (head) return {grab:{x:at(before,box),y},release:{x:at(after,box),y}};
+        return {grab:{x:at(before,box)+oldWidth*pxPerTick/2,y:y+rise()},release:{x:at(after,box)+newWidth*pxPerTick/2,y}};
+      }};
+  });
+  const cards=gradeCards(overlay,steps.filter(step=>step.detail?.grade && step.after!=null).length);
+  const extra=steps.flatMap((step,index)=>detailTasks(step,tasks[index],overlay,cards));
+  const detailed=new Set(extra.map(task=>task.clip));
+  return {tasks:[...tasks.filter((task,index)=>!(task.plain && detailed.has(steps[index].clip))),...extra],overlay};
+}
+// The Grade cards the swarm works on, stacked over the inspector.
+function gradeCards(overlay,count) {
+  const panel=()=>{
+    const box=document.querySelector('.panel.inspector').getBoundingClientRect();
+    if (box.width>=160) return box;
+    // No inspector on screen: the cards take the right edge of the viewer instead.
+    const viewer=byId('viewer-panel').getBoundingClientRect();
+    return {left:viewer.right-272,top:viewer.top,width:272,height:viewer.height};
+  };
+  let made=0;
+  let open=0;
+  let backdrop;
+  const frame=slot=>{
+    const box=panel();
+    const slots=Math.max(2,Math.floor((box.height-60)/102));
+    return {left:box.left+12,top:box.top+52+(slot%slots)*102,width:box.width-24,height:96};
+  };
+  return {frame,next:()=>made++,
+    show(card) {
+      if (!backdrop) {
+        const box=panel();
+        backdrop=item('div','magic-grade-back','');
+        backdrop.append(item('strong','','Grade'),item('span','',count+(count===1 ? ' clip' : ' clips')));
+        Object.assign(backdrop.style,{left:box.left+'px',top:box.top+'px',width:box.width+'px',height:box.height+'px'});
+        overlay.prepend(backdrop);
+        requestAnimationFrame(()=>backdrop.classList.add('shown'));
+      }
+      open++;
+      overlay.append(card);
+      requestAnimationFrame(()=>card.classList.add('shown'));
+    },
+    hide(card,toward) {
+      const box=card.getBoundingClientRect();
+      card.style.transform='translate('+(toward.x-box.left-box.width/2)+'px,'+(toward.y-box.top-box.height/2)+'px) scale(.3)';
+      card.classList.remove('shown');
+      setTimeout(()=>card.remove(),180);
+      if (--open<=0 && made>=count) setTimeout(()=>backdrop?.classList.remove('shown'),300);
+    }};
+}
+function detailTasks(step,main,overlay,cards) {
+  const detail=step.detail;
+  if (!detail || step.after==null) return [];
+  const after=main.plain ? null : main;
+  const wait=main.plain ? .3+Math.random()*.5 : 0;
+  const box=()=>{
+    const found=clipNode(step.clip)?.getBoundingClientRect();
+    if (found?.width) return found;
+    const lane=laneNamed(step.track)?.getBoundingClientRect();
+    return lane && {left:lane.left+step.after*pxPerTick,top:lane.top,width:step.after_width*pxPerTick,height:lane.height,
+      right:lane.left+(step.after+step.after_width)*pxPerTick,bottom:lane.bottom};
+  };
+  const hot={begin:()=>clipNode(step.clip)?.classList.add('magic-hot'),cool:()=>clipNode(step.clip)?.classList.remove('magic-hot')};
+  const base={clip:step.clip,after,...hot};
+  // Fade lengths are stored in timeline ticks.
+  const frames=count=>count*pxPerTick;
+  const tasks=[];
+  if (detail.typed) {
+    const words=detail.typed;
+    const face=()=>clipNode(step.clip)?.querySelector('strong');
+    tasks.push({...base,kind:'type',seconds:.12+.045*words.length,delay:wait+.05,
+      label:raw=>words.slice(0,Math.ceil(raw*words.length))+'|',
+      progress:raw=>{ const node=face(); if (node) node.textContent=raw>=1 ? words : words.slice(0,Math.ceil(raw*words.length)) || ' '; },
+      points:()=>{
+        const clip=box();
+        if (!clip) return null;
+        const spot={x:clip.left+Math.min(clip.width/2,60),y:clip.top+clip.height/2};
+        return {grab:spot,release:spot};
+      }});
+  }
+  if (detail.fade_in) {
+    tasks.push({...base,kind:'fade',label:'Fade in',delay:wait+.1,points:()=>{
+      const clip=box();
+      if (!clip) return null;
+      const y=clip.top+8;
+      return {grab:{x:clip.left+6+frames(detail.fade_in[0]),y},release:{x:Math.max(clip.left+6,clip.left+frames(detail.fade_in[1])),y}};
+    }});
+  }
+  if (detail.fade_out) {
+    tasks.push({...base,kind:'fade',label:'Fade out',delay:wait+.2,points:()=>{
+      const clip=box();
+      if (!clip) return null;
+      const y=clip.top+8;
+      return {grab:{x:clip.right-6-frames(detail.fade_out[0]),y},release:{x:Math.min(clip.right-6,clip.right-frames(detail.fade_out[1])),y}};
+    }});
+  }
+  if (detail.gain) {
+    const [from,to]=detail.gain;
+    const level=(clip,db)=>clip.top+clip.height*(.5-Math.max(-24,Math.min(24,db))/60);
+    tasks.push({...base,kind:'gain',label:(to<0 ? '\u2212' : '+')+Math.abs(Math.round(to*10)/10)+' dB',delay:wait+.4,points:()=>{
+      const clip=box();
+      if (!clip) return null;
+      const x=clip.left+Math.min(clip.width*.5,70);
+      return {grab:{x,y:level(clip,from)},release:{x,y:level(clip,to)}};
+    }});
+  }
+  if (detail.transition) {
+    const kind=detail.transition[1];
+    const edge=()=>{
+      const clip=box();
+      return clip && {x:clip.left,y:clip.top+clip.height/2};
+    };
+    if (!kind) {
+      tasks.push({...base,kind:'change',label:'No transition',delay:wait+.1,points:()=>{
+        const spot=edge();
+        return spot && {grab:spot,release:spot};
+      }});
+    } else {
+      const rows=['Dissolve','Dip to Black','Wipe'];
+      const row=/wipe/i.test(kind) ? 2 : /dip|black|fade/i.test(kind) ? 1 : 0;
+      let menu;
+      tasks.push({...base,kind:'transition',label:rows[row],delay:wait+.1,steady:true,
+        points:()=>{
+          const spot=edge();
+          return spot && {grab:spot,release:{x:spot.x+62,y:spot.y+20+21*row}};
+        },
+        position:(raw,grab,release)=>{
+          const u=Math.max(0,Math.min(1,(raw-.3)/.45));
+          const ease=u<.5 ? 4*u*u*u : 1-Math.pow(-2*u+2,3)/2;
+          return {x:grab.x+(release.x-grab.x)*ease,y:grab.y+(release.y-grab.y)*ease};
+        },
+        progress:raw=>{
+          if (!menu && raw<.9) {
+            const spot=edge();
+            if (!spot) return;
+            menu=item('div','magic-menu','');
+            rows.forEach(name=>menu.append(item('span','',name)));
+            Object.assign(menu.style,{left:spot.x+4+'px',top:spot.y+6+'px'});
+            overlay.append(menu);
+          }
+          if (!menu) return;
+          const opening=Math.min(1,raw/.15);
+          menu.style.opacity=opening;
+          menu.style.transform='scale('+(.85+.15*opening)+')';
+          menu.children[row].classList.toggle('picked',raw>.6);
+          if (raw>=.9) { menu.remove(); menu=null; }
+        },
+        finish:()=>menu?.remove()});
+    }
+  }
+  if (detail.grade) {
+    const [old,now]=detail.grade.map(grade=>grade || {});
+    const slot=cards.next();
+    const fields=[['exposure','Exposure',2,2],['contrast','Contrast',50,0],['saturation','Saturation',100,0]];
+    const signed=(value,digits)=>(value<0 ? '\u2212' : '+')+Math.abs(value).toFixed(digits);
+    let card;
+    const build=()=>{
+      if (card) return;
+      const frame=cards.frame(slot);
+      card=item('div','magic-grade-card','');
+      Object.assign(card.style,{left:frame.left+'px',top:frame.top+'px',width:frame.width+'px'});
+      const title=item('header','','');
+      title.append(item('b','','GRADE'),item('span','',step.label || clipNode(step.clip)?.querySelector('strong')?.textContent || 'Clip'));
+      const look=item('p','magic-look','');
+      look.append(item('span','','Look'),item('i','',old.look || 'None'));
+      card.append(title,look);
+      for (const [key,name,range,digits] of fields) {
+        const line=item('p','magic-slider','');
+        line.dataset.key=key;
+        line.append(item('span','',name),item('u','',''),item('em','',signed(old[key] || 0,digits)));
+        line.style.setProperty('--at',(old[key] || 0)/range);
+        card.append(line);
+      }
+      cards.show(card);
+    };
+    const chain=[];
+    const lookName=look=>String(look).split('/').at(-1).replace(/^lut:/,'').replace(/\.cube$/i,'');
+    if ((old.look || '')!==(now.look || '')) {
+      chain.push({kind:'look',label:now.look ? lookName(now.look) : 'No look',
+        points:()=>{
+          const frame=cards.frame(slot);
+          const spot={x:frame.left+119,y:frame.top+33};
+          return {grab:spot,release:spot};
+        },
+        begin:()=>card?.querySelector('.magic-look i').classList.add('picking'),
+        finish:()=>{
+          const chip=card?.querySelector('.magic-look i');
+          if (!chip) return;
+          chip.classList.remove('picking');
+          chip.textContent=now.look ? lookName(now.look) : 'None';
+        }});
+    }
+    fields.forEach(([key,name,range,digits],index)=>{
+      const [from,to]=[old[key] || 0,now[key] || 0];
+      if (from===to) return;
+      const knob=(frame,value)=>frame.left+84+(frame.width-130)*(.5+Math.max(-1,Math.min(1,value/range))/2);
+      chain.push({kind:'grade',label:name,
+        points:()=>{
+          const frame=cards.frame(slot);
+          const y=frame.top+54+15*index+6;
+          return {grab:{x:knob(frame,from),y},release:{x:knob(frame,to),y}};
+        },
+        apply:u=>{
+          const line=card?.querySelector('[data-key='+key+']');
+          if (!line) return;
+          const value=from+(to-from)*u;
+          line.style.setProperty('--at',value/range);
+          line.querySelector('em').textContent=signed(value,digits);
+        }});
+    });
+    if (!chain.length) chain.push({kind:'change',label:'Colour',points:()=>{
+      const frame=cards.frame(slot);
+      const spot={x:frame.left+frame.width/2,y:frame.top+48};
+      return {grab:spot,release:spot};
+    }});
+    chain.forEach((task,index)=>{
+      Object.assign(task,{clip:step.clip,steady:true,after:index ? chain[index-1] : after,same:index>0,
+        delay:index ? .03 : wait+.1+Math.random()*.35,approach:index ? undefined : build});
+      if (!index) { const begin=task.begin; task.begin=()=>{ build(); begin?.(); }; }
+    });
+    const last=chain.at(-1);
+    last.cool=()=>{
+      const clip=box();
+      if (card) cards.hide(card,clip ? {x:clip.left+clip.width/2,y:clip.top+clip.height/2} : {x:innerWidth/2,y:innerHeight/2});
+    };
+    tasks.push(...chain);
+  }
+  return tasks;
+}
+// While the swarm works, the viewer flashes the clips of the cut, as Editroom does.
+function flashViewer(steps) {
+  const clips=project.timeline.filter(clip=>source(clip.source)?.video).sort((a,b)=>a.start-b.start);
+  if (!clips.length) return ()=>{};
+  const stage=byId('viewer-picture');
+  const flash=item('div','magic-flash','');
+  const picture=new Image();
+  const pill=item('span','','');
+  flash.append(picture,pill);
+  flash.setAttribute('aria-hidden','true');
+  flash.hidden=true;
+  stage.append(flash);
+  let turn=0;
+  const show=()=>{
+    const clip=clips[turn++%clips.length];
+    const asset=source(clip.source);
+    const next=new Image();
+    next.onload=()=>{
+      picture.src=next.src;
+      pill.textContent=asset.title+'  '+time(clip.start+.6*length(clip));
+      flash.hidden=false;
+    };
+    next.src=sourceUrl('thumb',asset.id,asset.version);
+  };
+  const first=setTimeout(show,1000);
+  const timer=setInterval(show,1300);
+  return ()=>{
+    clearTimeout(first);
+    clearInterval(timer);
+    flash.remove();
+  };
+}
+async function performDirectorEdits(steps) {
+  const show=thinkingShow;
+  thinkingShow=null;
+  thinkingRun=null;
+  if (!showDirectorWork || calmMotion() || !window.MagicShow) {
+    show?.end();
+    return replayDirectorEdits(steps);
+  }
+  show?.handOver();
+  swarmShow?.skip();
+  const editor=projectId;
+  const revision=project.revision;
+  zoomTimeline(null);
+  timelineBody.scrollTop=0;
+  // Clips the swarm will place wait out of sight; clips it will move or trim start where they were.
+  const waiting=steps.filter(step=>step.before==null && step.after!=null && !step.ruler_item && !step.track_id);
+  for (const step of waiting) clipNode(step.clip)?.classList.add('magic-waiting');
+  const {tasks,overlay}=swarmTasks(steps);
+  for (const task of tasks) if (task.kind==='trim' || task.kind==='move') task.apply(0);
+  for (const task of tasks) if (task.kind==='type') task.progress(0);
+  const clear=()=>{
+    overlay.remove();
+    for (const node of timelineBody.querySelectorAll('.magic-waiting,.magic-hot,[data-magic-width]')) {
+      node.classList.remove('magic-waiting','magic-hot','magic-trim-head','magic-trim-tail','magic-moving');
+      node.style.transform='';
+    }
+    show?.release();
+  };
+  // Hold on the sketch of the cut before the cursors leave the button.
+  await new Promise(resolve=>setTimeout(resolve,show ? Math.min(2000,Math.max(800,show.drawnIn*1000+350)) : 0));
+  if (projectId!==editor || project.revision!==revision) return clear();
+  const button=byId('toggle-director').getBoundingClientRect();
+  const running=MagicShow.swarm({tasks,origin:()=>({x:button.left+button.width/2,y:button.top+button.height/2})});
+  swarmShow=running;
+  const stopFlashes=flashViewer(steps);
+  // As in Editroom, the editor is locked while the swarm works. Esc stops the show and takes the
+  // edit back; the Director panel and the app menus stay usable.
+  let reverted=false;
+  const hurry=event=>{
+    if (event.type==='keydown') {
+      if (event.metaKey || event.ctrlKey || ['Shift','Meta','Control','Alt','Tab'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key!=='Escape') return;
+      reverted=true;
+      running.skip();
+      return;
+    }
+    if (event.target.closest?.('#director-panel,.top,dialog')) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  addEventListener('pointerdown',hurry,true);
+  addEventListener('keydown',hurry,true);
+  await running.done;
+  removeEventListener('pointerdown',hurry,true);
+  removeEventListener('keydown',hurry,true);
+  if (swarmShow===running) swarmShow=null;
+  stopFlashes();
+  clear();
+  if (reverted && projectId===editor && project.revision===revision && savedProject.canUndo) {
+    undoableRun=null;
+    byId('undo').click();
+    status('Edit taken back.');
+  }
+}
 
 async function replayDirectorEdits(steps,signal) {
   if (!showDirectorWork || signal?.aborted) return;
@@ -7693,6 +8704,11 @@ function showClipMenu(event,clip) {
     ['Remove',() => mcp('delete_clips',selectionArgs()),!unlocked.length],
     ['Ripple delete',() => mcp('delete_clips',{...selectionArgs(),ripple:true}),!unlocked.length],
   ];
+  commands.push(['Director',[
+    ['Ask Director\u2026',()=>askDirector('@selected ',false)],
+    ['Tighten',()=>askDirector('Tighten @selected: trim slow starts and endings so the cut moves faster. Keep the order.',true)],
+    ['Match color to this clip',()=>askDirector('Match the color of the other clips to @selected so the cut looks consistent.',true)],
+  ],directorBusy() || !directorEnabled]);
   if (!clip.effects.freeze && ['video','audio'].includes(clip.kind)) {
     const presets=[25,50,100,200,400,800,1600,3000].map(percent=>[
       percent+'%',()=>changeClipSpeed(percent),false,Math.abs(clip.effects.speed*100-percent)<.5,

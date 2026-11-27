@@ -645,6 +645,19 @@ pub struct Project {
     pub undo_steps: Vec<Snapshot>,
     #[serde(default)]
     pub redo_steps: Vec<Snapshot>,
+    /// The cut before and after each Director edit, newest last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<Version>,
+}
+
+/// One Director edit kept as a version: the cut as it was, and as the edit left it.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct Version {
+    pub id: Uuid,
+    pub name: String,
+    pub at: u64,
+    pub before: Snapshot,
+    pub after: Snapshot,
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -677,6 +690,7 @@ impl Project {
             sequence_offer: None,
             undo_steps: vec![],
             redo_steps: vec![],
+            versions: vec![],
         }
     }
 
@@ -1160,7 +1174,11 @@ impl Project {
             "director_mentions": crate::director_prompt::suggestions(self),
             "revision": self.revision, "sequence": self.sequence, "frame_step": self.frame_step(),
             "sequence_offer": self.pending_sequence_offer(),
-            "canUndo": !self.undo_steps.is_empty(), "canRedo": !self.redo_steps.is_empty()
+            "canUndo": !self.undo_steps.is_empty(), "canRedo": !self.redo_steps.is_empty(),
+            "versions": self.versions.iter().rev().map(|version| serde_json::json!({
+                "id":version.id,"name":version.name,"at":version.at,
+                "clips":version.after.timeline.len(),"was":version.before.timeline.len()
+            })).collect::<Vec<_>>()
         })
     }
 
@@ -1260,7 +1278,7 @@ fn remap_timeline_assets(
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct VisibleEdit {
     pub action: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1283,6 +1301,10 @@ pub struct VisibleEdit {
     pub track_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// What changed inside the clip, as [before, after] pairs, so the browser can perform each
+    /// change as its own gesture: gain, fade_in, fade_out, grade, transition, typed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1303,6 +1325,9 @@ pub struct Run {
     pub stop_requested: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub applied: bool,
+    /// Changes waiting for the person to approve before the run applies them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub review: Vec<VisibleEdit>,
 }
 
 impl Run {
@@ -1318,6 +1343,7 @@ impl Run {
             edits: vec![],
             stop_requested: false,
             applied: false,
+            review: vec![],
         }
     }
 

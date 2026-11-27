@@ -71,6 +71,9 @@ pub struct Turn {
     pub asset_ids: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub failed: bool,
+    /// What the run added, removed and changed on the timeline, kept with the conversation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<crate::editor::VisibleEdit>,
 }
 
 impl Turn {
@@ -81,6 +84,7 @@ impl Turn {
             events: vec![],
             asset_ids,
             failed: false,
+            changes: vec![],
         }
     }
 
@@ -313,6 +317,7 @@ pub fn import(
                     events: turn.events,
                     asset_ids: turn.asset_ids,
                     failed: turn.failure.is_some(),
+                    changes: vec![],
                 };
                 metadata.import(assets);
                 let mut reply = Message::new(

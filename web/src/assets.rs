@@ -30,6 +30,7 @@ pub const STUDIO: &[(&str, &[u8])] = files!(
     "studio-demo.jpg",
     "studio-reel.jpg",
     "studio-reel.mp4",
+    "login-art.jpg",
 );
 
 pub const HOME: &[(&str, &[u8])] = files!(
@@ -44,6 +45,30 @@ pub const HOME: &[(&str, &[u8])] = files!(
     "reel-kite-dragon.mp4",
     "reel-paper-boat.jpg",
     "reel-paper-boat.mp4",
+    "film-safari.jpg",
+    "film-safari.mp4",
+    "film-pixel-ghost.jpg",
+    "film-pixel-ghost.mp4",
+    "film-cowhide.jpg",
+    "film-cowhide.mp4",
+    "reel-flying-turtle.jpg",
+    "safari-shot-1.jpg",
+    "safari-shot-2.jpg",
+    "safari-shot-3.jpg",
+    "safari-shot-4.jpg",
+    "safari-shot-5.jpg",
+    "safari-shot-6.jpg",
+    "safari-shot-7.jpg",
+    "wall-safari.jpg",
+    "wall-safari.mp4",
+    "wall-pixel-ghost.jpg",
+    "wall-pixel-ghost.mp4",
+    "wall-cowhide.jpg",
+    "wall-cowhide.mp4",
+    "wall-turtle.jpg",
+    "wall-turtle.mp4",
+    "wall-dragon.jpg",
+    "wall-dragon.mp4",
 );
 
 pub fn find(files: &'static [(&str, &[u8])], name: &str) -> Option<&'static [u8]> {
