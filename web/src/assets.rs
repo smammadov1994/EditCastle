@@ -30,6 +30,7 @@ pub const STUDIO: &[(&str, &[u8])] = files!(
     "studio-demo.jpg",
     "studio-reel.jpg",
     "studio-reel.mp4",
+    "login-art.jpg",
 );
 
 pub const HOME: &[(&str, &[u8])] = files!(

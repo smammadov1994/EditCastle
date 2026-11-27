@@ -52,8 +52,17 @@
     </div>
   </header>
   <main>
-    <section id="login" class="login panel" hidden>
+    <section id="login" class="login" hidden>
+      <div class="login-art" aria-hidden="true">
+        <div class="login-art-copy">
+          <p class="login-slate"><span></span>EditCastle Studio</p>
+          <p class="login-line">Say the film.<br>Watch it get made<i>.</i></p>
+        </div>
+      </div>
+      <div class="login-card">
+      <img class="login-mark" src="/studio-logo.png" alt="" width="40" height="40">
       <h1 id="login-title">Open your studio</h1>
+      <p class="login-lede">Your films, your timeline and Director, in the browser.</p>
       <p id="local-login-note" hidden>Enter the access key from the computer running EditCastle.</p>
       <form id="login-form" hidden>
         <label for="owner-key">Studio access key</label>
@@ -72,6 +81,7 @@
       <p id="account-status" role="status"></p>
       <a id="account-test-inbox" class="button" target="_blank" rel="noopener noreferrer" hidden>Open test inbox</a>
       <p id="login-error" class="error" role="status"></p>
+      </div>
     </section>
     <div id="studio" class="workspace" hidden>
       <section class="editing" aria-label="Video editor">
