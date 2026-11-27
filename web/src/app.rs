@@ -2147,6 +2147,7 @@ async fn apply_local_plan(
             current.revision += 1;
             let saved = current.clone();
             if let Some(run) = db.runs.iter_mut().find(|run| run.id == id) {
+                run.studio_turn_mut().changes = edits.clone();
                 run.edits = edits;
             }
             Ok(saved)
@@ -2721,6 +2722,7 @@ async fn direct(
                 current.timeline = draft.timeline;
                 current.revision += 1;
                 if let Some(run) = db.runs.iter_mut().find(|item| item.id == run) {
+                    run.studio_turn_mut().changes = edits.clone();
                     run.edits = edits;
                 }
                 Ok(())
@@ -3014,6 +3016,7 @@ async fn render_plan(
                 .collect();
         }
         if let Some(run) = db.runs.iter_mut().find(|item| item.id == run) {
+            run.studio_turn_mut().changes = edits.clone();
             run.edits = edits;
         }
         Ok(())
@@ -4857,6 +4860,7 @@ impl EditDraft<'_> {
                 .map(|source| source.id)
                 .collect();
             if let Some(run) = db.runs.iter_mut().find(|item| item.id == run) {
+                run.studio_turn_mut().changes = self.edits.clone();
                 run.edits = self.edits;
                 run.studio_turn_mut().asset_ids = asset_ids;
             }
@@ -5374,7 +5378,7 @@ fn visible_edits(
                 source: (!clip.source.is_nil()).then_some(clip.source),
                 ruler_item: None,
                 track_id: None,
-                label: None,
+                label: Some(clip.name(after).to_owned()),
                 before_width: first.map(Clip::duration),
                 after_width: Some(clip.duration()),
                 detail: edit_detail(first, clip),

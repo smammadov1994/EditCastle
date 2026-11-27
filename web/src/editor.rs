@@ -1260,7 +1260,7 @@ fn remap_timeline_assets(
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct VisibleEdit {
     pub action: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -12,15 +12,21 @@ soundtrack.preload = 'metadata';
 let shortcutStorage;
 try { shortcutStorage = window.localStorage; } catch (_) {}
 const shortcutPreferences = new StudioShortcuts.Preferences(shortcutStorage);
-const editorThemes = ['palenight','clay','auto','dark','grey','amber','light'];
+const editorThemes = ['pro','palenight','clay','auto','dark','grey','amber','light'];
 function displayPreference(name,fallback) {
   try { return localStorage.getItem('editroom.'+name) ?? fallback; } catch (_) { return fallback; }
 }
 function storeDisplayPreference(name,value) {
   try { localStorage.setItem('editroom.'+name,value); } catch (_) {}
 }
-let editorTheme=displayPreference('appearance','palenight');
-if (!editorThemes.includes(editorTheme)) editorTheme='palenight';
+let editorTheme=displayPreference('appearance','pro');
+// Pro is the studio's look now. Move anyone still on the old default over once; a later choice sticks.
+if (displayPreference('appearance-pro','')!=='seen') {
+  if (editorTheme==='palenight') editorTheme='pro';
+  storeDisplayPreference('appearance','pro'===editorTheme ? 'pro' : editorTheme);
+  storeDisplayPreference('appearance-pro','seen');
+}
+if (!editorThemes.includes(editorTheme)) editorTheme='pro';
 let timeStyle=displayPreference('time-style','timecode') === 'simple' ? 'simple' : 'timecode';
 let directorEnabled=displayPreference('director-enabled','true') === 'true';
 let directorPanelOpen=displayPreference('director-open','true') === 'true';
@@ -2390,8 +2396,98 @@ function messageBubble(message) {
   return bubble;
 }
 
+// What a run did to the timeline, as a change list: green for additions, red for removals,
+// amber for clips that were changed in place.
+let undoableRun=null;
+function describeChange(step) {
+  const place=[step.track_id ? '' : step.track,step.after!=null ? tc(step.after) : step.before!=null ? tc(step.before) : ''].filter(Boolean).join(' \u00b7 ');
+  if (step.track_id) return {kind:step.after==null ? 'remove' : step.before==null ? 'add' : 'change',name:step.label || step.track,place:'',notes:[]};
+  if (step.ruler_item) {
+    const name=step.ruler_item==='marker' ? 'Marker'+(step.label ? ' \u201c'+step.label+'\u201d' : '') : step.label || step.ruler_item;
+    return {kind:step.after==null ? 'remove' : step.before==null ? 'add' : 'change',name,place,notes:step.before!=null && step.after!=null ? ['Moved'] : []};
+  }
+  const name=step.label || source(step.source)?.title || 'Clip';
+  if (step.before==null) return {kind:'add',name,place,notes:[Number(time(step.after_width))+' s'],clip:step.clip};
+  if (step.after==null) return {kind:'remove',name,place,notes:[Number(time(step.before_width || 0))+' s']};
+  const notes=[];
+  const detail=step.detail || {};
+  if (step.before_width!==step.after_width) notes.push('Trimmed '+Number(time(step.before_width))+' s \u2192 '+Number(time(step.after_width))+' s');
+  if (step.before!==step.after || (step.from_track && step.from_track!==step.track)) notes.push('Moved');
+  if (detail.gain) notes.push('Volume '+(detail.gain[1]<0 ? '\u2212' : '+')+Math.abs(Math.round(detail.gain[1]*10)/10)+' dB');
+  if (detail.fade_in) notes.push(detail.fade_in[1] ? 'Fade in' : 'Fade in removed');
+  if (detail.fade_out) notes.push(detail.fade_out[1] ? 'Fade out' : 'Fade out removed');
+  if (detail.grade) notes.push('Color');
+  if (detail.transition) notes.push(detail.transition[1] ? 'Transition' : 'Transition removed');
+  if (detail.typed) notes.push('Text');
+  if (!notes.length) notes.push('Adjusted');
+  return {kind:'change',name,place,notes,clip:step.clip};
+}
+function changeList(studio) {
+  // Several steps on one clip (placed, then faded) read as one line.
+  const rows=[];
+  const byClip=new Map();
+  for (const step of studio.changes) {
+    const row=describeChange(step);
+    const known=!step.track_id && !step.ruler_item && byClip.get(step.clip);
+    if (!known) {
+      rows.push(row);
+      if (!step.track_id && !step.ruler_item) byClip.set(step.clip,row);
+      continue;
+    }
+    if (row.kind==='remove') Object.assign(known,{kind:known.kind==='add' ? 'gone' : 'remove',notes:row.notes});
+    else known.notes=[...new Set([...known.notes,...row.notes])].filter((note,_,all)=>note!=='Adjusted' || all.length===1);
+  }
+  for (let index=rows.length-1;index>=0;index--) if (rows[index].kind==='gone') rows.splice(index,1);
+  if (!rows.length) return document.createDocumentFragment();
+  const box=item('section','change-list','');
+  box.setAttribute('aria-label','Timeline changes');
+  const head=item('header','','');
+  const count=kind=>rows.filter(row=>row.kind===kind).length;
+  for (const [kind,sign,word] of [['add','+','added'],['remove','\u2212','removed'],['change','~','changed']]) {
+    if (!count(kind)) continue;
+    const chip=item('span','change-count '+kind,sign+count(kind));
+    chip.title=count(kind)+' '+word;
+    chip.setAttribute('aria-label',count(kind)+' '+word);
+    head.append(chip);
+  }
+  if (undoableRun?.id===studio.id && undoableRun.revision===savedProject.revision && savedProject.canUndo) {
+    const undo=item('button','button change-undo','Undo');
+    undo.type='button';
+    undo.title='Undo this whole edit';
+    undo.onclick=()=>{
+      undoableRun=null;
+      byId('undo').click();
+    };
+    head.append(undo);
+  }
+  box.append(head);
+  const list=item('ul','','');
+  for (const row of rows.slice(0,8)) {
+    const line=item('li',row.kind,'');
+    const sign=item('b','',row.kind==='add' ? '+' : row.kind==='remove' ? '\u2212' : '~');
+    sign.setAttribute('aria-hidden','true');
+    const words=item('span','','');
+    words.append(item('strong','',row.name),item('small','',[row.place,...row.notes].filter(Boolean).join(' \u00b7 ')));
+    line.append(sign,words);
+    line.setAttribute('aria-label',({add:'Added ',remove:'Removed ',change:'Changed '})[row.kind]+row.name);
+    if (row.clip) {
+      line.tabIndex=0;
+      line.dataset.jump='true';
+      const jump=()=>{
+        if (!directorOwnsCut() && project.timeline.some(clip=>clip.id===row.clip)) selectClip(row.clip);
+      };
+      line.onclick=jump;
+      line.onkeydown=event=>{ if (event.key==='Enter') jump(); };
+    }
+    list.append(line);
+  }
+  box.append(list);
+  if (rows.length>8) box.append(item('p','change-more','and '+(rows.length-8)+' more'));
+  return box;
+}
 function studioTurnDetails(studio,expanded) {
   const nodes=[];
+  if (studio.changes?.length) nodes.push(changeList(studio));
   const detail=(kind,label)=>{
     const box=item('details','history-detail','');
     box.dataset.historyDetail=studio.id+'/'+kind;
@@ -2542,7 +2638,12 @@ function renderActivity() {
   const runPlan = byId('run-plan');
   const expanded = new Set([...byId('director-panel').querySelectorAll('details[data-history-detail][open]')]
     .map(box=>box.dataset.historyDetail));
-  const messages = JSON.stringify([project.id,project.revision,project.library_revision,project.sources.length,project.messages]);
+  const finished=state.runs.find(run=>run.project===projectId);
+  if (finished && finished.id===shownRun && finished.status!=='running' && finished.applied) {
+    undoableRun={id:finished.id,revision:savedProject.revision};
+  }
+  const messages = JSON.stringify([project.id,project.revision,project.library_revision,project.sources.length,project.messages,
+    undoableRun?.revision===savedProject.revision && savedProject.canUndo ? undoableRun.id : null]);
   if (conversation.dataset.content !== messages) {
     const scroll=conversation.scrollTop;
     const follow=conversation.scrollHeight-conversation.clientHeight-scroll<30;
@@ -7624,9 +7725,22 @@ async function performDirectorEdits(steps) {
   const running=MagicShow.swarm({tasks,origin:()=>({x:button.left+button.width/2,y:button.top+button.height/2})});
   swarmShow=running;
   const stopFlashes=flashViewer(steps);
+  // As in Editroom, the editor is locked while the swarm works. Esc stops the show and takes the
+  // edit back; the Director panel and the app menus stay usable.
+  let reverted=false;
   const hurry=event=>{
-    if (event.type==='keydown' && ['Shift','Meta','Control','Alt'].includes(event.key)) return;
-    running.skip();
+    if (event.type==='keydown') {
+      if (event.metaKey || event.ctrlKey || ['Shift','Meta','Control','Alt','Tab'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key!=='Escape') return;
+      reverted=true;
+      running.skip();
+      return;
+    }
+    if (event.target.closest?.('#director-panel,.top,dialog')) return;
+    event.preventDefault();
+    event.stopPropagation();
   };
   addEventListener('pointerdown',hurry,true);
   addEventListener('keydown',hurry,true);
@@ -7636,6 +7750,11 @@ async function performDirectorEdits(steps) {
   if (swarmShow===running) swarmShow=null;
   stopFlashes();
   clear();
+  if (reverted && projectId===editor && project.revision===revision && savedProject.canUndo) {
+    undoableRun=null;
+    byId('undo').click();
+    status('Edit taken back.');
+  }
 }
 
 async function replayDirectorEdits(steps,signal) {

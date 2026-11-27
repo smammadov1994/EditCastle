@@ -333,8 +333,8 @@
             <button id="provider-button" type="button" class="button" aria-label="Provider settings">⚙</button>
           </div>
         </div>
-        <div class="segmented" aria-label="Studio mode"><button class="button" id="director-mode" aria-pressed="true">Director</button><button class="button" id="quick-mode" aria-pressed="false">Quick Clips</button></div>
-        <div class="segmented providers" aria-label="Editing provider"><button class="button provider-tab" data-name="open_ai">ChatGPT</button><button class="button provider-tab" data-name="claude">Claude</button><button class="button provider-tab" data-name="local">Local</button></div>
+        <div class="segmented" aria-label="Studio mode" hidden><button class="button" id="director-mode" aria-pressed="true">Director</button><button class="button" id="quick-mode" aria-pressed="false">Quick Clips</button></div>
+        <div class="segmented providers" aria-label="Editing provider" hidden><button class="button provider-tab" data-name="open_ai">ChatGPT</button><button class="button provider-tab" data-name="claude">Claude</button><button class="button provider-tab" data-name="local">Local</button></div>
         <p id="agent-activity" class="agent-activity" role="status" hidden><strong id="agent-name"></strong><span id="agent-action"></span></p>
         <div id="conversation" class="conversation" role="log" aria-label="Director conversation"></div>
         <section id="recover-renders" class="run-plan" aria-label="Interrupted renders" hidden></section>
