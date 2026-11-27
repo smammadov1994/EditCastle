@@ -105,7 +105,8 @@ impl Hosted {
                 }
             }
             let mut publish = |message: &str| {
-                if self.activities.insert(message.to_owned()) {
+                // Reply text pieces always pass; activity lines are reported once.
+                if message.starts_with('\u{1e}') || self.activities.insert(message.to_owned()) {
                     report(message);
                 }
             };
@@ -118,7 +119,12 @@ impl Hosted {
                     },
                     "response.web_search_call.in_progress"
                     | "response.web_search_call.searching" => publish("Searching public sources"),
-                    "response.output_text.delta" => publish("Writing a response"),
+                    "response.output_text.delta" => {
+                        publish("Writing a response");
+                        if let Some(piece) = event["delta"].as_str() {
+                            publish(&format!("\u{1e}{piece}"));
+                        }
+                    }
                     "response.output_item.done" => {
                         let item = &event["item"];
                         if item["type"] == "message" && item["phase"] == "commentary" {
@@ -223,7 +229,12 @@ impl ClaudeMessage {
                     .context("Claude returned a delta outside its content block.")?;
                 let delta = &event["delta"];
                 match delta["type"].as_str() {
-                    Some("text_delta") => append(&mut block.value, "text", delta),
+                    Some("text_delta") => {
+                        if let Some(piece) = delta["text"].as_str() {
+                            publish(&format!("\u{1e}{piece}"));
+                        }
+                        append(&mut block.value, "text", delta)
+                    }
                     Some("thinking_delta") => append(&mut block.value, "thinking", delta),
                     Some("signature_delta") => append(&mut block.value, "signature", delta),
                     Some("input_json_delta") => block
@@ -393,6 +404,8 @@ mod tests {
             [
                 "Planning the edit",
                 "Writing a response",
+                // Reply text is passed on piece by piece, marked so it is never shown as activity.
+                "\u{1e}License verified.",
                 "Preparing an EditCastle tool"
             ]
         );

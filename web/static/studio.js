@@ -203,13 +203,13 @@ const time = ticks => (ticks / TICKS_PER_SECOND).toFixed(2);
 const sourceUrl = (route,id,version = source(id)?.version) => {
   const params=new URLSearchParams();
   if (version) params.set('v',version);
-  if (presentedFrame && !savedProject.sources.some(item=>item.id===id && item.version===version)) {
+  if (presentedFrame && !presentedFrame.peek && !savedProject.sources.some(item=>item.id===id && item.version===version)) {
     params.set('draft',presentedFrame.run);
   }
   return '/api/' + route + '/' + id + (params.size?'?'+params:'');
 };
 const mediaUrl = id => sourceUrl('media',id);
-const previewQuery = () => presentedFrame ? '?draft='+presentedFrame.run+'&frame='+presentedFrame.sequence : '';
+const previewQuery = () => presentedFrame && !presentedFrame.peek ? '?draft='+presentedFrame.run+'&frame='+presentedFrame.sequence : '';
 const clipAudioUrl = clip => clip.timed_audio
   ? projectUrl('/audio-preview/' + clip.id + '/' + clip.timed_audio + previewQuery())
   : mediaUrl(clip.source);
@@ -409,7 +409,9 @@ function renderStudio(nextState) {
   const direct = showDirectorWork && directorFrame && directorFrame.run===run?.id && run.status==='running' &&
     !run.stop_requested && stoppingRun!==run.id && directorFrame.base_revision===saved.revision ? directorFrame : null;
   const external = mcpFrame?.project===saved.id && mcpFrame.base_revision===saved.revision ? mcpFrame : null;
-  const frame=direct || external;
+  const peek = versionPeek?.project===saved.id && versionPeek.base_revision===saved.revision && run?.status!=='running' ? versionPeek : null;
+  if (versionPeek && !peek) versionPeek=null;
+  const frame=direct || external || peek;
   const openingDraft=frame && !presentedFrame;
   const leavingDraft=!frame && presentedFrame;
   if (openingDraft) previewSelection={id:saved.id,selected,ids:[...selection],at:frameAt,
@@ -470,7 +472,9 @@ function renderStudio(nextState) {
   editPane.inert=locked;
   timelineBody.dataset.draft=String(Boolean(frame));
   byId('draft-label').hidden=!frame;
-  byId('draft-label').textContent=external && frame===external ? 'Attached agent preview' : 'Director preview';
+  byId('draft-label').textContent=frame?.peek ? frame.label+' \u00b7 click to return'
+    : external && frame===external ? 'Attached agent preview' : 'Director preview';
+  byId('draft-label').dataset.peek=String(Boolean(frame?.peek));
   if (projectChanged) {
     directorAnimation?.abort();
     clearLibrarySkim(true);
@@ -2401,14 +2405,16 @@ function messageBubble(message) {
 let undoableRun=null;
 function describeChange(step) {
   const place=[step.track_id ? '' : step.track,step.after!=null ? tc(step.after) : step.before!=null ? tc(step.before) : ''].filter(Boolean).join(' \u00b7 ');
-  if (step.track_id) return {kind:step.after==null ? 'remove' : step.before==null ? 'add' : 'change',name:step.label || step.track,place:'',notes:[]};
+  if (step.track_id) return {fixed:true,kind:step.after==null ? 'remove' : step.before==null ? 'add' : 'change',name:step.label || step.track,place:'',notes:[]};
   if (step.ruler_item) {
     const name=step.ruler_item==='marker' ? 'Marker'+(step.label ? ' \u201c'+step.label+'\u201d' : '') : step.label || step.ruler_item;
-    return {kind:step.after==null ? 'remove' : step.before==null ? 'add' : 'change',name,place,notes:step.before!=null && step.after!=null ? ['Moved'] : []};
+    return {id:step.ruler_item==='marker' ? step.clip : null,fixed:step.ruler_item!=='marker',at:step.after ?? step.before ?? 0,
+      kind:step.after==null ? 'remove' : step.before==null ? 'add' : 'change',name,place,notes:step.before!=null && step.after!=null ? ['Moved'] : []};
   }
   const name=step.label || source(step.source)?.title || 'Clip';
-  if (step.before==null) return {kind:'add',name,place,notes:[Number(time(step.after_width))+' s'],clip:step.clip};
-  if (step.after==null) return {kind:'remove',name,place,notes:[Number(time(step.before_width || 0))+' s']};
+  const middle=step.after!=null ? step.after+(step.after_width || 0)/2 : (step.before || 0)+(step.before_width || 0)/2;
+  if (step.before==null) return {id:step.clip,at:middle,kind:'add',name,place,notes:[Number(time(step.after_width))+' s'],clip:step.clip};
+  if (step.after==null) return {id:step.clip,at:middle,kind:'remove',name,place,notes:[Number(time(step.before_width || 0))+' s']};
   const notes=[];
   const detail=step.detail || {};
   if (step.before_width!==step.after_width) notes.push('Trimmed '+Number(time(step.before_width))+' s \u2192 '+Number(time(step.after_width))+' s');
@@ -2420,13 +2426,13 @@ function describeChange(step) {
   if (detail.transition) notes.push(detail.transition[1] ? 'Transition' : 'Transition removed');
   if (detail.typed) notes.push('Text');
   if (!notes.length) notes.push('Adjusted');
-  return {kind:'change',name,place,notes,clip:step.clip};
+  return {id:step.clip,at:middle,kind:'change',name,place,notes,clip:step.clip};
 }
-function changeList(studio) {
-  // Several steps on one clip (placed, then faded) read as one line.
+// Rows for a list of changes, with several steps on one clip folded into one row.
+function changeRows(changes) {
   const rows=[];
   const byClip=new Map();
-  for (const step of studio.changes) {
+  for (const step of changes) {
     const row=describeChange(step);
     const known=!step.track_id && !step.ruler_item && byClip.get(step.clip);
     if (!known) {
@@ -2437,7 +2443,20 @@ function changeList(studio) {
     if (row.kind==='remove') Object.assign(known,{kind:known.kind==='add' ? 'gone' : 'remove',notes:row.notes});
     else known.notes=[...new Set([...known.notes,...row.notes])].filter((note,_,all)=>note!=='Adjusted' || all.length===1);
   }
-  for (let index=rows.length-1;index>=0;index--) if (rows[index].kind==='gone') rows.splice(index,1);
+  return rows.filter(row=>row.kind!=='gone');
+}
+function changeLine(row) {
+  const line=item('li',row.kind,'');
+  const sign=item('b','',row.kind==='add' ? '+' : row.kind==='remove' ? '\u2212' : '~');
+  sign.setAttribute('aria-hidden','true');
+  const words=item('span','','');
+  words.append(item('strong','',row.name),item('small','',[row.place,...row.notes].filter(Boolean).join(' \u00b7 ')));
+  line.append(sign,words);
+  line.setAttribute('aria-label',({add:'Added ',remove:'Removed ',change:'Changed '})[row.kind]+row.name);
+  return line;
+}
+function changeList(studio) {
+  const rows=changeRows(studio.changes);
   if (!rows.length) return document.createDocumentFragment();
   const box=item('section','change-list','');
   box.setAttribute('aria-label','Timeline changes');
@@ -2463,21 +2482,42 @@ function changeList(studio) {
   box.append(head);
   const list=item('ul','','');
   for (const row of rows.slice(0,8)) {
-    const line=item('li',row.kind,'');
-    const sign=item('b','',row.kind==='add' ? '+' : row.kind==='remove' ? '\u2212' : '~');
-    sign.setAttribute('aria-hidden','true');
-    const words=item('span','','');
-    words.append(item('strong','',row.name),item('small','',[row.place,...row.notes].filter(Boolean).join(' \u00b7 ')));
-    line.append(sign,words);
-    line.setAttribute('aria-label',({add:'Added ',remove:'Removed ',change:'Changed '})[row.kind]+row.name);
-    if (row.clip) {
+    const line=changeLine(row);
+    const kept=savedProject.versions?.some(version=>version.id===studio.id);
+    if (row.id && (row.clip || kept)) {
       line.tabIndex=0;
       line.dataset.jump='true';
-      const jump=()=>{
-        if (!directorOwnsCut() && project.timeline.some(clip=>clip.id===row.clip)) selectClip(row.clip);
+      line.title=kept ? 'Show this change: before and after' : 'Select this clip';
+      const jump=event=>{
+        if (event.target.closest('button') || directorOwnsCut()) return;
+        if (row.clip && project.timeline.some(clip=>clip.id===row.clip)) {
+          selectClip(row.clip,{seek:false});
+          clipNode(row.clip)?.animate([{filter:'brightness(1)'},{filter:'brightness(2.1)'},{filter:'brightness(1)'}],{duration:700});
+        }
+        if (kept) compareChange(studio.id,row);
       };
       line.onclick=jump;
-      line.onkeydown=event=>{ if (event.key==='Enter') jump(); };
+      line.onkeydown=event=>{ if (event.key==='Enter') jump(event); };
+    }
+    if (kept && row.id && !row.fixed) {
+      const back=item('button','button change-back','\u21a9');
+      back.type='button';
+      back.title='Take back only this change';
+      back.setAttribute('aria-label','Take back '+row.name);
+      back.onclick=async()=>{
+        if (directorOwnsCut()) return status('Wait for Director to finish.');
+        back.disabled=true;
+        try {
+          await post(projectUrl('/versions/'+studio.id+'/revert'),{clip:row.id});
+          closeCompare();
+          await refresh();
+          status('Took back the change to '+row.name+'.');
+        } catch (error) {
+          back.disabled=false;
+          status(error.message);
+        }
+      };
+      line.append(back);
     }
     list.append(line);
   }
@@ -2651,6 +2691,12 @@ function renderActivity() {
     conversation.replaceChildren(...bubbleList(project.messages,expanded));
     conversation.scrollTop = follow ? conversation.scrollHeight : scroll;
   }
+  typeLatestReply(conversation);
+  renderLiveReply(conversation);
+  renderReview();
+  renderEstimate();
+  renderVersions();
+  applyIndexBadges();
   const run = state.runs.find(run => run.project === projectId);
   elapsedRun=run;
   renderRunElapsed();
@@ -2708,6 +2754,7 @@ function renderActivity() {
     byId('stop-run').hidden = !active || run.applied;
     byId('stop-run').disabled = run.stop_requested || stoppingRun===run.id;
     if (active && (run.stop_requested || stoppingRun===run.id)) byId('run-status').textContent = 'Stopping';
+    else if (active && run.review?.length) byId('run-status').textContent = 'Waiting for review';
 
     if (events.dataset.content !== visible) {
       events.dataset.content = visible;
@@ -2948,6 +2995,7 @@ async function watchDirectorDraft(watcher) {
       if (packet.activity_events) {
         activity=packet.activity_version;
         watcher.events=packet.activity_events;
+        watcher.reply=packet.reply || '';
         noteThinking(packet.activity_events);
         renderActivity();
       }
@@ -3026,6 +3074,7 @@ function selectClip(id,{extend = false,keep = false,seek = true} = {}) {
   }
 }
 function updateSelection() {
+  renderPromptChips();
   const clip = currentClip();
   byId('remove').disabled = !libraryPickCount() && !linkedSelection(selection).length && !captionSelection.size;
   if (sourcePreview) return;
@@ -5712,10 +5761,12 @@ byId('prompt-form').onsubmit = async event => {
   savePromptDraft(draft,editor);
   try {
     const run = await post(projectUrl('/director'), { prompt, selected, selected_clips:[...selection],
-      selected_media:pickedMedia(), duration:duration ? Number(duration) : null, quick, playhead:frameAt });
+      selected_media:pickedMedia(), duration:duration ? Number(duration) : null, quick, playhead:frameAt,
+      review:reviewFirst && !quick });
     if (sessionStorage.getItem(promptDraftKey(editor))===draft) savePromptDraft('',editor);
     if (projectId===editor) {
       shownRun = run.id;
+      typedPending = run.id;
       if (input.value===draft) {
         input.value='';
         closeMentions();
@@ -7249,6 +7300,323 @@ document.addEventListener('keydown', event => {
 });
 mode(false);
 
+// ── Director, beyond the show ────────────────────────────────────────────────
+let reviewFirst=displayPreference('director-review','true')==='true';
+let versionPeek=null;
+let reviewShown=null;
+const reviewKept=new Set();
+byId('review-first').checked=reviewFirst;
+byId('review-first').onchange=event=>{
+  reviewFirst=event.target.checked;
+  storeDisplayPreference('director-review',String(reviewFirst));
+};
+
+// Review before applying: the finished draft waits as a checklist. Unticked rows are left out.
+function renderReview() {
+  const panel=byId('review-panel');
+  const run=state.runs.find(run=>run.project===projectId && run.status==='running' && run.review?.length && !run.stop_requested);
+  panel.hidden=!run;
+  if (!run) {
+    reviewShown=null;
+    return;
+  }
+  const rows=changeRows(run.review);
+  if (reviewShown!==run.id) {
+    reviewShown=run.id;
+    reviewKept.clear();
+    rows.forEach((row,index)=>reviewKept.add(index));
+    thinkingShow?.handOver();
+    byId('review-apply').disabled=byId('review-discard').disabled=false;
+  }
+  const list=byId('review-list');
+  const key=run.id+':'+rows.length;
+  if (list.dataset.content!==key) {
+    list.dataset.content=key;
+    list.replaceChildren(...rows.map((row,index)=>{
+      const line=changeLine(row);
+      const box=item('input','','');
+      box.type='checkbox';
+      box.checked=true;
+      box.disabled=!row.id || row.fixed;
+      box.setAttribute('aria-label','Keep '+row.name);
+      box.onchange=()=>{
+        if (box.checked) reviewKept.add(index);
+        else reviewKept.delete(index);
+        line.dataset.struck=String(!box.checked);
+        countReview(rows);
+      };
+      line.prepend(box);
+      return line;
+    }));
+  }
+  countReview(rows);
+  const decide=approve=>async()=>{
+    byId('review-apply').disabled=byId('review-discard').disabled=true;
+    const rejected=approve ? rows.filter((row,index)=>!reviewKept.has(index) && row.id).map(row=>row.id) : [];
+    try {
+      await post(projectUrl('/director/review'),{run:run.id,approve,rejected});
+      if (!approve) endThinking();
+      await refresh();
+    } catch (error) {
+      byId('review-apply').disabled=byId('review-discard').disabled=false;
+      byId('director-error').textContent=error.message;
+    }
+  };
+  byId('review-apply').onclick=decide(true);
+  byId('review-discard').onclick=decide(false);
+}
+function countReview(rows) {
+  const kept=rows.filter((row,index)=>reviewKept.has(index)).length;
+  byId('review-count').textContent=kept+' of '+rows.length;
+  byId('review-apply').textContent=kept===rows.length ? 'Apply all '+kept : kept ? 'Apply '+kept : 'Apply none';
+}
+
+// Before and after of one change, side by side over the viewer.
+let compareBox=null;
+function closeCompare() {
+  compareBox?.remove();
+  compareBox=null;
+}
+function compareChange(version,row) {
+  closeCompare();
+  const box=item('div','change-compare','');
+  compareBox=box;
+  const at=Math.max(0,Math.round(row.at || 0));
+  for (const [label,before] of [['Before',true],['After',false]]) {
+    const side=item('figure','','');
+    side.dataset.loading='true';
+    const picture=new Image();
+    picture.alt=label+' '+row.name;
+    picture.onload=()=>{ delete side.dataset.loading; };
+    picture.onerror=()=>{ delete side.dataset.loading; side.dataset.empty='true'; };
+    picture.src=projectUrl('/versions/'+version+'/frame?at='+at+(before ? '&before=true' : ''));
+    side.append(picture,item('figcaption','',label));
+    box.append(side);
+  }
+  const head=item('header','','');
+  head.append(item('strong','',row.name),item('span','',tc(at)));
+  const close=item('button','button','Close');
+  close.type='button';
+  close.onclick=closeCompare;
+  head.append(close);
+  box.prepend(head);
+  byId('viewer-picture').append(box);
+}
+addEventListener('keydown',event=>{
+  if (event.key==='Escape' && compareBox) closeCompare();
+});
+
+// Versions: every Director edit keeps the cut before and after it.
+function renderVersions() {
+  const versions=savedProject.versions || [];
+  byId('versions-open').disabled=!versions.length;
+  byId('versions-open').textContent=versions.length ? 'Versions '+versions.length : 'Versions';
+  const panel=byId('versions-panel');
+  if (!versions.length) panel.hidden=true;
+  if (panel.hidden) return;
+  const list=byId('versions-list');
+  const key=JSON.stringify([versions,savedProject.revision,versionPeek?.run,versionPeek?.before]);
+  if (list.dataset.content===key) return;
+  list.dataset.content=key;
+  const ago=at=>{
+    const minutes=Math.max(0,Math.round((Date.now()-at)/60000));
+    return minutes<1 ? 'just now' : minutes<60 ? minutes+' min ago' : minutes<1440 ? Math.round(minutes/60)+' h ago' : Math.round(minutes/1440)+' d ago';
+  };
+  list.replaceChildren(...versions.map((version,index)=>{
+    const line=item('li','','');
+    const words=item('div','','');
+    words.append(item('strong','',version.name),item('small','','Version '+(versions.length-index)+' · '+ago(version.at)+' · '+version.was+' → '+version.clips+' clips'));
+    const tools=item('div','version-tools','');
+    for (const [label,before] of [['View before',true],['View after',false]]) {
+      const view=item('button','button',label);
+      view.type='button';
+      view.setAttribute('aria-pressed',String(versionPeek?.run===version.id && versionPeek.before===before));
+      view.onclick=()=>peekVersion(version,before);
+      tools.append(view);
+    }
+    const restore=item('button','button','Restore before');
+    restore.type='button';
+    restore.title='Bring the cut back to how it was before this edit';
+    restore.onclick=()=>restoreVersion(version,true);
+    const again=item('button','button','Restore after');
+    again.type='button';
+    again.title='Bring the cut back to how this edit left it';
+    again.onclick=()=>restoreVersion(version,false);
+    tools.append(restore,again);
+    line.append(words,tools);
+    return line;
+  }));
+}
+async function peekVersion(version,before) {
+  if (directorOwnsCut()) return status('Wait for Director to finish.');
+  if (versionPeek?.run===version.id && versionPeek.before===before) return leavePeek();
+  try {
+    const view=await api(projectUrl('/versions/'+version.id+(before ? '?before=true' : '')));
+    versionPeek={scene:view.scene,base_revision:savedProject.revision,project:projectId,run:version.id,sequence:0,edits:[],
+      external:true,peek:true,before,label:(before ? 'Before: ' : 'After: ')+version.name};
+    renderStudio(state);
+  } catch (error) {
+    status(error.message);
+  }
+}
+function leavePeek() {
+  if (!versionPeek) return;
+  versionPeek=null;
+  renderStudio(state);
+}
+async function restoreVersion(version,before) {
+  if (directorOwnsCut()) return status('Wait for Director to finish.');
+  versionPeek=null;
+  try {
+    await post(projectUrl('/versions/'+version.id+'/restore'),{before});
+    await refresh();
+    status('Restored the cut '+(before ? 'from before' : 'from after')+' “'+version.name+'”. Undo brings the current cut back.');
+  } catch (error) {
+    status(error.message);
+  }
+}
+byId('versions-open').onclick=()=>{
+  const panel=byId('versions-panel');
+  panel.hidden=!panel.hidden;
+  byId('versions-open').setAttribute('aria-expanded',String(!panel.hidden));
+  if (panel.hidden) leavePeek();
+  else {
+    byId('versions-list').dataset.content='';
+    renderVersions();
+  }
+};
+byId('versions-close').onclick=()=>byId('versions-open').click();
+byId('draft-label').onclick=()=>{ if (byId('draft-label').dataset.peek==='true') leavePeek(); };
+
+// What the prompt will act on, shown as chips above the box.
+function renderPromptChips() {
+  const chips=[];
+  const clips=selection.size;
+  const media=libraryPickCount();
+  if (clips) chips.push(clips===1 ? '1 clip selected' : clips+' clips selected');
+  if (media) chips.push(media===1 ? '1 media item selected' : media+' media items selected');
+  const box=byId('prompt-chips');
+  const key=chips.join('|');
+  if (box.dataset.content===key) return;
+  box.dataset.content=key;
+  box.hidden=!chips.length;
+  box.replaceChildren(...chips.map(text=>item('span','prompt-chip',text)));
+  if (chips.length) box.append(item('small','','Director works on these. Type @ to point at something else.'));
+}
+
+// Open the Director with a prompt, from a clip menu or the keyboard.
+function askDirector(text,send) {
+  if (!directorEnabled) return;
+  if (!directorPanelOpen) {
+    directorPanelOpen=true;
+    updateDirectorPanel();
+    storeDisplayPreference('director-open','true');
+  }
+  const prompt=byId('prompt');
+  if (text!=null) {
+    prompt.value=text;
+    prompt.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  prompt.focus();
+  prompt.setSelectionRange(prompt.value.length,prompt.value.length);
+  if (send && !directorBusy()) byId('prompt-form').requestSubmit();
+}
+addEventListener('keydown',event=>{
+  if (event.key.toLowerCase()!=='k' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+  if (byId('studio').hidden || document.querySelector('dialog[open]')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  askDirector(null,false);
+},true);
+
+// What a run will cost and how long the last one took, before Send.
+function renderEstimate() {
+  const seconds=Number(byId('duration').value);
+  const parts=['Editing your footage is free'];
+  parts.push('new shots cost 1 credit per second'+(seconds ? ', about '+Math.ceil(seconds)+' per shot' : ', up to 15 per shot'));
+  if (Number.isFinite(state.available)) parts.push(state.available+' credits left');
+  const done=state.runs.filter(run=>run.project===projectId && run.status!=='running' && Number.isFinite(run.started_at) && Number.isFinite(run.finished_at)).at(-1);
+  if (done) parts.push('last run took '+Math.max(1,Math.round(done.finished_at-done.started_at))+' s');
+  const text=parts.join(' · ')+'.';
+  if (byId('run-estimate').textContent!==text) byId('run-estimate').textContent=text;
+}
+byId('duration').addEventListener('input',()=>{ if (state) renderEstimate(); });
+
+// Reply text as it is written. A provider that streams fills the bubble piece by piece; a reply
+// that arrives whole is revealed word by word.
+let typedReply=null;
+function renderLiveReply(conversation) {
+  const run=state.runs.find(run=>run.project===projectId && run.status==='running');
+  const text=run && directorWatch?.run===run.id ? directorWatch.reply || '' : '';
+  let bubble=conversation.querySelector('.bubble.streaming-live');
+  if (!text) {
+    bubble?.remove();
+    return;
+  }
+  const follow=conversation.scrollHeight-conversation.clientHeight-conversation.scrollTop<40;
+  if (!bubble) {
+    bubble=item('p','bubble director-msg streaming streaming-live','');
+    bubble.setAttribute('aria-live','off');
+    conversation.append(bubble);
+  }
+  if (bubble.textContent!==text) bubble.textContent=text;
+  if (follow) conversation.scrollTop=conversation.scrollHeight;
+  typedReply=run.id;
+}
+function typeLatestReply(conversation) {
+  const last=project.messages.at(-1);
+  const run=state.runs.find(run=>run.project===projectId);
+  if (!last || last.from==='you' || !last.text || last.citations?.length || !run || run.status==='running') return;
+  if (run.id!==shownRun && run.id!==typedPending) return;
+  if (typedReply===run.id || calmMotion()) {
+    typedReply=run.id;
+    return;
+  }
+  typedReply=run.id;
+  const words=last.text.split(/(\s+)/);
+  let shown=0;
+  // The conversation can be drawn again while the reply is appearing, so each step finds the
+  // bubble afresh instead of holding on to one element.
+  const step=()=>{
+    const bubble=[...conversation.querySelectorAll('.bubble.director-msg:not(.streaming-live)')].at(-1);
+    if (!bubble || project.messages.at(-1)?.text!==last.text) return;
+    shown=Math.min(words.length,shown+Math.max(2,Math.ceil(words.length/60)));
+    bubble.textContent=words.slice(0,shown).join('');
+    bubble.classList.toggle('streaming',shown<words.length);
+    conversation.scrollTop=conversation.scrollHeight;
+    if (shown<words.length) setTimeout(step,45);
+  };
+  step();
+}
+let typedPending=null;
+
+// Background analysis made visible: tiles show when a file is being tagged or transcribed.
+let indexPending=new Map();
+let indexTimer=null;
+async function watchIndexing() {
+  clearTimeout(indexTimer);
+  const editor=projectId;
+  try {
+    if (editor && !byId('studio').hidden && !document.hidden) {
+      const view=await api(projectUrl('/indexing'));
+      if (projectId===editor) {
+        indexPending=new Map(view.pending.map(entry=>[entry.id,entry]));
+        applyIndexBadges();
+      }
+    }
+  } catch (_) {}
+  indexTimer=setTimeout(watchIndexing,indexPending.size ? 3000 : 15000);
+}
+function applyIndexBadges() {
+  for (const tile of document.querySelectorAll('#media-list [data-asset]')) {
+    const entry=indexPending.get(tile.dataset.asset);
+    const label=entry ? [entry.tagging && 'Tagging',entry.transcribing && 'Transcribing'].filter(Boolean).join(' · ') : '';
+    if (label) tile.dataset.indexing=label;
+    else delete tile.dataset.indexing;
+  }
+}
+watchIndexing();
+
 // The Director show. While a run works, the timeline stays as saved and a thinking overlay scans
 // the media and sketches the coming cut. When the run lands, a swarm of cursors performs it.
 let thinkingShow=null;
@@ -8336,6 +8704,11 @@ function showClipMenu(event,clip) {
     ['Remove',() => mcp('delete_clips',selectionArgs()),!unlocked.length],
     ['Ripple delete',() => mcp('delete_clips',{...selectionArgs(),ripple:true}),!unlocked.length],
   ];
+  commands.push(['Director',[
+    ['Ask Director\u2026',()=>askDirector('@selected ',false)],
+    ['Tighten',()=>askDirector('Tighten @selected: trim slow starts and endings so the cut moves faster. Keep the order.',true)],
+    ['Match color to this clip',()=>askDirector('Match the color of the other clips to @selected so the cut looks consistent.',true)],
+  ],directorBusy() || !directorEnabled]);
   if (!clip.effects.freeze && ['video','audio'].includes(clip.kind)) {
     const presets=[25,50,100,200,400,800,1600,3000].map(percent=>[
       percent+'%',()=>changeClipSpeed(percent),false,Math.abs(clip.effects.speed*100-percent)<.5,

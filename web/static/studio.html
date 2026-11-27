@@ -358,20 +358,37 @@
           <div id="run-plan" class="run-plan" hidden></div>
           <ol id="events"></ol>
         </section>
+        <section id="review-panel" class="review" aria-labelledby="review-title" hidden>
+          <div class="section-head"><h2 id="review-title">Review changes</h2><span id="review-count"></span></div>
+          <p class="review-note">Nothing is applied yet. Untick a change to leave it out.</p>
+          <ul id="review-list"></ul>
+          <div class="review-actions">
+            <button type="button" class="button" id="review-discard">Discard</button>
+            <button type="button" class="button primary" id="review-apply">Apply</button>
+          </div>
+        </section>
+        <section id="versions-panel" class="versions" aria-labelledby="versions-title" hidden>
+          <div class="section-head"><h2 id="versions-title">Versions</h2><button type="button" class="button" id="versions-close">Close</button></div>
+          <ul id="versions-list"></ul>
+        </section>
         <form id="prompt-form" class="composer">
           <div class="composer-head">
             <label for="prompt">What should we make?</label>
             <div class="composer-tools">
               <button type="button" class="button" id="prompt-ideas" aria-haspopup="menu" aria-expanded="false">Ideas</button>
               <button type="button" class="button" id="prompt-history" aria-haspopup="menu" aria-expanded="false">History</button>
+              <button type="button" class="button" id="versions-open" aria-controls="versions-panel" aria-expanded="false">Versions</button>
             </div>
           </div>
+          <div id="prompt-chips" class="prompt-chips" hidden></div>
           <textarea id="prompt" rows="3" maxlength="3000" aria-controls="mentions" aria-autocomplete="list" placeholder="Follow a paper boat under a bridge in three connected shots."></textarea>
           <div id="mentions" class="mentions" role="listbox" aria-label="Director references" hidden></div>
           <div class="composer-row">
             <label class="duration">Seconds per shot <input id="duration" type="number" min="1" max="15" step="0.1" placeholder="Auto"></label>
             <button type="submit" class="button primary" id="send">Send</button>
           </div>
+          <label class="review-setting"><input type="checkbox" id="review-first"> Review changes before applying</label>
+          <p id="run-estimate" class="run-estimate"></p>
           <p id="director-error" role="status" class="error"></p>
         </form>
       </aside>

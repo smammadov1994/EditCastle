@@ -928,3 +928,57 @@ body:has(#login:not([hidden])) .top .brand span { color: #f4eddd; }
 }
 @media (prefers-reduced-motion: reduce) { .login-art, #login .login-card { animation: none; } }
 @font-face { font-family: "Barlow Condensed"; src: url("/landing/type/barlow-condensed-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+
+/* Director: review, compare, versions, chips, estimate, live reply, analysis badges. */
+.review, .versions { border: 1px solid var(--lane-edge); border-radius: 10px; background: var(--field); padding: 8px; display: grid; gap: 6px; }
+.review[hidden], .versions[hidden] { display: none; }
+.review .section-head, .versions .section-head { margin: 0; }
+.review-note { margin: 0; font-size: .72rem; color: var(--soft); }
+.review ul, .versions ul { list-style: none; margin: 0; padding: 0; max-height: min(34vh, 300px); overflow: auto; border-radius: 6px; }
+.review li { --add: #3fb950; --remove: #f85149; --change: #d29922; display: grid; grid-template-columns: 22px 18px minmax(0,1fr); align-items: center; padding: 5px 8px 5px 4px; border-left: 3px solid var(--tone); background: color-mix(in srgb, var(--tone) 9%, transparent); font-size: .78rem; }
+.review li + li { border-top: 1px solid var(--muted-edge); }
+.review li.add { --tone: var(--add); } .review li.remove { --tone: var(--remove); } .review li.change { --tone: var(--change); }
+.review li b { text-align: center; color: var(--tone); font: 700 .82rem/1.2 ui-monospace, "SF Mono", Menlo, monospace; }
+.review li span { display: grid; min-width: 0; }
+.review li strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review li small { color: var(--soft); font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review li input { margin: 0; width: 14px; height: 14px; accent-color: var(--primary); }
+.review li[data-struck=true] { --tone: var(--faint); opacity: .55; }
+.review li[data-struck=true] strong { text-decoration: line-through; }
+.review-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.change-list li { grid-template-columns: 22px minmax(0,1fr) auto; }
+.change-back { padding: 0 7px; height: 22px; align-self: center; font-size: .8rem; opacity: 0; }
+.change-list li:is(:hover, :focus-within) .change-back { opacity: 1; }
+.change-compare { position: absolute; inset: 0; z-index: 4; display: grid; grid-template: auto minmax(0,1fr) / 1fr 1fr; gap: 2px; background: #000; color: #fff; }
+.change-compare header { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 6px 8px; background: #161618; font-size: .78rem; }
+.change-compare header span { color: #a2a2a9; font-variant-numeric: tabular-nums; }
+.change-compare header .button { margin-left: auto; padding: 2px 10px; }
+.change-compare figure { position: relative; margin: 0; min-height: 0; background: #0a0a0b; display: grid; place-items: center; }
+.change-compare img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.change-compare figcaption { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 5px; background: #000000a6; font: 600 .68rem/1.5 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+.change-compare figure:first-of-type figcaption { color: #ff8f85; }
+.change-compare figure:last-of-type figcaption { color: #6fdc8c; }
+.change-compare figure[data-loading]::after { content: "Rendering\2026"; position: absolute; color: #a2a2a9; font-size: .78rem; animation: pulse 1.4s infinite; }
+.change-compare figure[data-empty] img { display: none; }
+.change-compare figure[data-empty]::after { content: "Nothing here in this version"; position: absolute; color: #a2a2a9; font-size: .78rem; }
+.versions li { display: grid; gap: 5px; padding: 7px 4px; font-size: .78rem; }
+.versions li + li { border-top: 1px solid var(--muted-edge); }
+.versions li strong { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.versions li small { color: var(--soft); font-size: .7rem; }
+.version-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.version-tools .button { padding: 2px 8px; font-size: .7rem; }
+.draft-label[data-peek=true] { cursor: pointer; }
+.prompt-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 6px; }
+.prompt-chips[hidden] { display: none; }
+.prompt-chip { padding: 2px 9px; border-radius: 20px; font-size: .72rem; font-weight: 600; color: var(--ink); background: color-mix(in srgb, var(--primary) 26%, transparent); border: 1px solid color-mix(in srgb, var(--primary) 55%, transparent); }
+.prompt-chips small { flex-basis: 100%; color: var(--soft); font-size: .68rem; }
+.review-setting { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: .74rem; color: var(--soft); }
+.review-setting input { margin: 0; accent-color: var(--primary); }
+.run-estimate { margin: 6px 0 0; font-size: .68rem; line-height: 1.4; color: var(--faint); }
+.bubble.streaming::after { content: ""; display: inline-block; width: 7px; height: 1em; margin-left: 2px; vertical-align: -2px; background: currentColor; opacity: .7; animation: pulse 1s steps(2, jump-none) infinite; }
+#media-list [data-asset][data-indexing] { position: relative; overflow: hidden; }
+#media-list [data-asset][data-indexing]::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(100deg, transparent 30%, #ffffff2e 50%, transparent 70%); background-size: 220% 100%; animation: index-sweep 1.6s linear infinite; }
+#media-list [data-asset][data-indexing]::after { content: attr(data-indexing); position: absolute; z-index: 2; left: 4px; top: 4px; padding: 1px 6px; border-radius: 4px; background: #000000b3; color: #fff; font: 600 9.5px/1.5 system-ui, sans-serif; letter-spacing: .04em; pointer-events: none; }
+@keyframes index-sweep { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+@media (prefers-reduced-motion: reduce) { #media-list [data-asset][data-indexing]::before { animation: none; } }
+:root[data-editor-theme="pro"] :is(.review, .versions) { border-radius: 6px; background: #0e0e10; border-color: #ffffff17; }
