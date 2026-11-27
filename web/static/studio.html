@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Director · EditCastle Studio</title>
+  <link rel="icon" href="/studio-logo.png">
+  <link rel="stylesheet" href="/studio.css">
+  <script src="/device-folders.js" defer></script>
+  <script src="/grade-preview.js" defer></script>
+  <script src="/timeline-view.js" defer></script>
+  <script src="/filmstrip.js" defer></script>
+  <script src="/shortcuts.js" defer></script>
+  <script src="/studio.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/"><img src="/studio-logo.png" alt=""><span>Studio Home</span></a>
+    <span class="top-title"><span id="project-title"></span><span id="project-unsaved" class="project-unsaved" role="status" aria-label="Unsaved changes" hidden> • Unsaved</span></span>
+    <div class="top-actions" id="studio-actions" hidden>
+      <details id="project-menu" class="project-menu">
+        <summary class="button">File</summary>
+        <div class="project-menu-items">
+          <button type="button" class="button" id="file-new">New Project</button>
+          <button type="button" class="button" id="file-open">Open Project…</button>
+          <button type="button" class="button" id="file-recent">Open Recent…</button>
+          <button type="button" class="button" id="file-rename">Rename Project…</button>
+          <button type="button" class="button" id="file-save">Save Project</button>
+          <button type="button" class="button" id="file-save-as">Save As…</button>
+          <button type="button" class="button" id="file-revert" disabled>Revert to Saved…</button>
+          <button type="button" class="button" id="file-download">Download Project</button>
+          <button type="button" class="button" id="file-import">Import Media…</button>
+          <button type="button" class="button" id="editor-settings">Editor Settings…</button>
+          <button type="button" class="button" id="shortcut-settings">Keyboard Shortcuts…</button>
+        </div>
+      </details>
+      <button class="button" id="clip-commands" type="button" aria-haspopup="menu" aria-controls="clip-menu" aria-expanded="false">Clip</button>
+      <button class="button" id="mark-commands" type="button" aria-haspopup="menu" aria-controls="clip-menu" aria-expanded="false">Mark</button>
+      <button class="button" id="credit-button" type="button">Credits</button>
+      <button class="button" id="toggle-director" type="button" aria-controls="director-panel" aria-expanded="true">Director</button>
+      <button class="button" id="signout" type="button">Sign out</button>
+      <details id="export-queue" class="project-menu" hidden>
+        <summary class="button export-queue-pill" aria-label="Export queue" aria-describedby="export-queue-status"><progress id="export-queue-progress" max="100" aria-label="Current export progress" hidden></progress><span id="export-queue-status"></span></summary>
+        <div class="project-menu-items export-queue-list">
+          <div id="export-jobs" aria-label="Exports"></div>
+          <button type="button" class="button" id="export-clear" hidden>Clear Finished</button>
+        </div>
+      </details>
+      <button class="button primary" id="export" type="button">Export</button>
+    </div>
+  </header>
+  <main>
+    <section id="login" class="login panel" hidden>
+      <h1 id="login-title">Open your studio</h1>
+      <p id="local-login-note" hidden>Enter the access key from the computer running EditCastle.</p>
+      <form id="login-form" hidden>
+        <label for="owner-key">Studio access key</label>
+        <input type="password" id="owner-key" required autocomplete="current-password" spellcheck="false">
+        <button class="button primary" type="submit">Open studio</button>
+      </form>
+      <form id="account-form" hidden>
+        <label id="account-email-label" for="account-email">Email</label>
+        <input id="account-email" type="email" required autocomplete="username" maxlength="254">
+        <label id="account-password-label" for="account-password">Password</label>
+        <input id="account-password" type="password" required autocomplete="current-password" maxlength="1024">
+        <button id="account-submit" class="button primary" type="submit">Sign in</button>
+        <button id="account-mode" class="button" type="button">Create an account</button>
+        <button id="account-recover" class="button" type="button">Forgot password?</button>
+      </form>
+      <p id="account-status" role="status"></p>
+      <a id="account-test-inbox" class="button" target="_blank" rel="noopener noreferrer" hidden>Open test inbox</a>
+      <p id="login-error" class="error" role="status"></p>
+    </section>
+    <div id="studio" class="workspace" hidden>
+      <section class="editing" aria-label="Video editor">
+        <div class="upper">
+        <section id="media-panel" class="panel library" aria-labelledby="media-title">
+          <div class="section-head"><h2 id="media-title">Media</h2><button id="new-title" class="button icon" type="button" title="Add title or drag to the timeline" aria-label="Add title" draggable="true">T</button><button id="new-solid" class="button icon" type="button" title="Add solid or drag to the timeline" aria-label="Add solid" draggable="true">▰</button><span id="source-count"></span><button id="media-layout" class="button icon" type="button" aria-label="Toggle media thumbnails" title="Toggle media thumbnails">▣</button><button id="media-folders" class="button icon" type="button" aria-label="Add media folder" title="Add media folder">▱</button><label class="button icon import" for="import" title="Import media" aria-label="Import media">↓</label></div>
+          <div class="project-bar">
+          <label class="sr-only" for="project-select">Project</label>
+          <select id="project-select"></select>
+          <button class="button" id="new-project" type="button" title="New project" aria-label="New project">+</button>
+          <button class="button" id="rename-project" type="button" title="Rename project" aria-label="Rename project">✎</button>
+
+          <input id="import" type="file" accept="video/*,audio/*,image/*,.mov,.mp4,.m4a,.mp3,.wav,.mkv" multiple hidden>
+          <input id="folder-upload" type="file" webkitdirectory multiple hidden>
+          </div>
+          <div id="folder-navigation" class="folder-navigation" hidden>
+            <nav id="folder-trail" aria-label="Media folder"></nav>
+            <button id="folder-actions" class="button icon" type="button" aria-label="Media folder actions">⋯</button>
+          </div>
+          <p id="device-folder-status" class="device-folder-status" role="status" hidden></p>
+          <button id="locate-missing-folder" class="button" type="button" hidden>Locate missing media</button>
+          <input id="missing-media-folder" type="file" webkitdirectory multiple hidden>
+          <label class="sr-only" for="media-search">Search media</label>
+          <input type="search" id="media-search" placeholder="Search media" maxlength="300" title="Search what appears on screen. Use quotes for spoken words.">
+          <div id="media-list" class="media-list"></div>
+        </section>
+        <div id="media-splitter" class="panel-splitter vertical" role="separator" tabindex="0" aria-label="Media panel width" aria-controls="media-panel" aria-orientation="vertical" aria-description="Left and right arrows resize. Enter resets the panel size."></div>
+        <div id="viewer-panel" class="preview panel">
+          <div id="viewer-stage" class="viewer-stage">
+            <div id="viewer-viewport" class="viewer-viewport" role="region" aria-label="Viewer picture" tabindex="-1">
+              <div class="viewer-scroll-surface">
+                <div id="viewer-picture" class="viewer-picture">
+                  <div id="audio-preview-name" class="preview-empty" hidden></div>
+                  <div id="empty-preview" class="preview-empty">
+                    <img src="/studio-logo.png" alt="">
+                    <p id="empty-preview-text">Drop video, audio or images anywhere.</p>
+                    <button type="button" class="button" id="viewer-import">Import Media</button>
+                  </div>
+                  <video id="preview" playsinline preload="metadata" hidden aria-label="Timeline preview"></video>
+                  <canvas id="composite" role="img" aria-label="Composited sequence preview" hidden></canvas>
+                  <video id="trim-frame" class="trim-frame" preload="auto" muted playsinline aria-hidden="true" hidden></video>
+                  <canvas id="source-skim-frame" aria-hidden="true" hidden></canvas>
+                </div>
+              </div>
+            </div>
+            <span id="trim-readout" class="trim-readout" hidden></span>
+            <div id="source-skim-label" aria-hidden="true" hidden><span></span><time></time></div>
+            <div id="master-meters" aria-label="Stereo output levels"></div>
+          </div>
+          <div class="preview-bar">
+            <label id="viewer-time"><input type="text" id="timecode" value="00:00:00:00" inputmode="numeric" aria-label="Playhead timecode"><span id="total-time"></span></label>
+            <div class="transport" aria-label="Transport">
+              <button class="button icon" id="prev-edit" type="button" title="Previous edit" aria-label="Previous edit">◀▏</button>
+              <button class="button icon" id="back-frame" type="button" title="Back one frame" aria-label="Back one frame">▏◀</button>
+              <button class="button primary play" id="play-cut" type="button" aria-label="Play or pause" disabled>▶</button>
+              <button class="button icon" id="next-frame" type="button" title="Forward one frame" aria-label="Forward one frame">▶▏</button>
+              <button class="button icon" id="next-edit" type="button" title="Next edit" aria-label="Next edit">▏▶</button>
+            </div>
+            <div class="view-controls">
+              <button class="button icon" id="loop" type="button" aria-label="Loop playback" aria-pressed="false">↻</button>
+              <select id="viewer-zoom" aria-label="Viewer zoom"><option value="fit">Fit</option><option value=".25">25%</option><option value=".5">50%</option><option value="1">100%</option><option value="2">200%</option></select>
+              <button class="button icon" id="full-screen" type="button" aria-label="Full screen viewer" aria-pressed="false">⤢</button>
+            </div>
+          </div>
+        </div>
+        <section class="panel inspector" aria-labelledby="preview-title">
+          <div class="section-head"><h2 id="preview-title">Sequence</h2></div>
+          <div id="sequence-inspector">
+            <h3>Frame</h3>
+            <select id="sequence-size" aria-label="Sequence frame size"><option>1344 × 768</option><option>1920 × 1080</option><option>1080 × 1920</option><option>1080 × 1080</option></select>
+            <div class="sequence-dimensions"><input id="sequence-width" type="number" aria-label="Width" min="128" max="3840" value="1344"><span>×</span><input id="sequence-height" type="number" aria-label="Height" min="128" max="3840" value="768"></div>
+            <h3>Frame rate</h3><select id="sequence-fps" aria-label="Frame rate"><option>23.976</option><option>24</option><option>25</option><option>29.97</option><option>30</option><option>50</option><option>59.94</option><option>60</option><option>100</option><option>119.88</option><option>120</option></select>
+          </div>
+          <section id="caption-inspector" class="caption-inspector" hidden aria-label="Caption settings">
+            <form id="caption-edit-form" hidden>
+              <label>Caption text <textarea id="caption-text" maxlength="300" rows="2"></textarea></label>
+            </form>
+            <fieldset id="caption-styles">
+              <legend>Style</legend>
+              <label>Size <input id="caption-size" type="range" min="28" max="140"></label>
+              <label>Position <input id="caption-position" type="range" min="10" max="95" step=".1"></label>
+              <label>Text <input id="caption-text-color" type="color"></label>
+              <div class="caption-color-row">
+                <label>Highlight <input id="caption-highlight" type="checkbox"></label>
+                <input id="caption-highlight-color" type="color" aria-label="Highlight color">
+              </div>
+              <div class="caption-color-row">
+                <label>Outline <input id="caption-outline" type="checkbox"></label>
+                <input id="caption-outline-color" type="color" aria-label="Outline color">
+              </div>
+            </fieldset>
+          </section>
+          <fieldset id="trim-controls" class="trim" disabled>
+            <legend class="sr-only">Selected clip</legend>
+            <label>In <input id="trim-in" type="number" min="0" step="any" aria-label="In point in seconds"></label>
+            <label>Out <input id="trim-out" type="number" min="0" step="any" aria-label="Out point in seconds"></label>
+            <button class="button" id="trim" type="button">Trim</button>
+            <button class="button icon" id="move-left" type="button" title="Move clip left" aria-label="Move clip left">←</button>
+            <button class="button icon" id="move-right" type="button" title="Move clip right" aria-label="Move clip right">→</button>
+            <label class="check"><input id="fade" type="checkbox"> Fade</label>
+            <label class="check"><input id="mute" type="checkbox"> Mute</label>
+          </fieldset>
+          <fieldset id="playback-controls" class="picture-controls playback-controls" hidden>
+            <legend>Playback</legend>
+            <label id="clip-gain-row">Volume (dB) <input id="clip-gain" type="number" min="-60" max="12" step=".1"></label>
+            <div id="clip-speed-row" class="transform-row">
+              <label>Speed (%) <input id="clip-speed" type="number" min="5" max="10000" step="any"></label>
+              <button type="button" class="button" id="ramp-toggle" aria-pressed="false" aria-controls="speed-ramp-controls">Ramp</button>
+            </div>
+            <div id="speed-ramp-controls" class="zoom-controls" hidden>
+              <canvas id="speed-ramp-graph" height="92" aria-hidden="true"></canvas>
+              <div id="speed-ramp-points" class="zoom-points"></div>
+              <div class="zoom-options">
+                <div aria-label="Speed ramp shape">
+                  <button type="button" class="button" data-ramp-mode="in" aria-pressed="false">In</button>
+                  <button type="button" class="button" data-ramp-mode="inOut" aria-pressed="false">In/Out</button>
+                </div>
+              </div>
+              <details id="ramp-settings"><summary>Ramp values</summary>
+                <label>Ease in starts (%) <input id="ramp-in-start" type="number" min="0" max="100" step="any"></label>
+                <label>Ease in ends (%) <input id="ramp-from" type="number" min="0" max="100" step="any"></label>
+                <label>Ease out starts (%) <input id="ramp-to" type="number" min="0" max="100" step="any"></label>
+                <label>Ease out ends (%) <input id="ramp-out-end" type="number" min="0" max="100" step="any"></label>
+                <label>Start speed (%) <input id="ramp-start-speed" type="number" min="5" max="10000" step="any"></label>
+                <label>Middle speed (%) <input id="ramp-speed" type="number" min="5" max="10000" step="any"></label>
+                <label>End speed (%) <input id="ramp-end-speed" type="number" min="5" max="10000" step="any"></label>
+                <button type="button" class="button" id="ramp-apply">Apply Ramp</button>
+              </details>
+            </div>
+            <button type="button" class="button" id="reset-playback" disabled>Reset Playback</button>
+          </fieldset>
+          <fieldset id="timing-controls" class="picture-controls" disabled hidden>
+            <legend class="sr-only">Clip timing</legend>
+            <details data-fade-group="picture"></details>
+            <details data-fade-group="audio"></details>
+            <template id="fade-controls-template">
+              <summary>Fades</summary>
+              <fieldset class="fade-fields">
+                <legend class="sr-only">Fade settings</legend>
+                <label>Fade in (s) <input data-fade-duration="in" type="number" min="0" step="any"></label>
+                <label>Curve <select data-fade-curve="in" aria-label="Fade in curve"><option value="linear">Linear</option><option value="easeIn">Exponential</option><option value="easeOut">Logarithmic</option><option value="smooth">S-Curve</option></select></label>
+                <label>Fade out (s) <input data-fade-duration="out" type="number" min="0" step="any"></label>
+                <label>Curve <select data-fade-curve="out" aria-label="Fade out curve"><option value="linear">Linear</option><option value="easeIn">Exponential</option><option value="easeOut">Logarithmic</option><option value="smooth">S-Curve</option></select></label>
+                <button type="button" class="button" data-remove-fades>Remove Fades</button>
+              </fieldset>
+            </template>
+          </fieldset>
+          <fieldset id="picture-controls" class="picture-controls" disabled hidden>
+            <legend class="sr-only">Picture adjustments</legend>
+            <details id="transform-controls" open><summary>Transform</summary>
+              <div class="transform-row">
+                <label>Scale (%) <input id="clip-scale" type="number" min="5" max="1000" step="any"></label>
+                <button type="button" class="button icon" id="clip-zoom" aria-pressed="false" title="Animate scale and position">Zoom</button>
+              </div>
+              <div id="zoom-controls" class="zoom-controls" hidden>
+                <canvas id="zoom-graph" height="82" aria-hidden="true"></canvas>
+                <div id="zoom-points" class="zoom-points"></div>
+                <div class="zoom-options">
+                  <div aria-label="Zoom motion"><button class="button" data-zoom-mode="in" type="button">In</button><button class="button" data-zoom-mode="inOut" type="button">In/Out</button><button class="button" data-zoom-mode="out" type="button">Out</button></div>
+                  <button id="zoom-ease" class="button" type="button" aria-pressed="true">Ease</button>
+                </div>
+              </div>
+              <label>X (px) <input id="clip-x" type="number" step="any"></label>
+              <label>Y (px) <input id="clip-y" type="number" step="any"></label>
+              <label id="solid-color-row" hidden>Fill <input id="clip-solid-color" type="color"></label>
+              <button id="reset-transform" class="button" type="button">Reset transform</button>
+            </details>
+            <details id="title-controls" hidden open><summary>Title</summary>
+              <label>Text <textarea id="clip-title-text" rows="2" maxlength="3000"></textarea></label>
+              <label>Font <input id="clip-title-font" list="title-fonts"></label>
+              <datalist id="title-fonts"><option value="System"></datalist>
+              <label>Size <input id="clip-title-size" type="number" min="12" max="600"></label>
+              <label>Bold <input id="clip-title-bold" type="checkbox"></label>
+              <label>Color <input id="clip-title-color" type="color"></label>
+              <label>Position X <input id="clip-title-x" type="number" min="0" max="1" step=".01"></label>
+              <label>Position Y <input id="clip-title-y" type="number" min="0" max="1" step=".01"></label>
+            </details>
+            <details id="transition-controls" hidden>
+              <summary>Transitions</summary>
+              <div id="transition-in" class="transition-settings">
+                <label>In <select id="clip-transition"><option value="none">None</option><option value="dissolve">Dissolve</option><option value="dipToBlack">Dip to Black</option><option value="wipe">Wipe</option></select></label>
+                <label id="transition-in-length">Length <input id="transition-duration" aria-label="Transition In length in seconds" type="number" min=".1" max="5" step=".01"></label>
+                <p id="transition-in-info" class="transition-info" hidden></p>
+              </div>
+              <div id="transition-out" class="transition-settings">
+                <label>Out <select id="clip-transition-out"><option value="none">None</option><option value="dissolve">Dissolve</option><option value="dipToBlack">Dip to Black</option><option value="wipe">Wipe</option></select></label>
+                <label id="transition-out-length">Length <input id="transition-out-duration" aria-label="Transition Out length in seconds" type="number" min=".1" max="5" step=".01"></label>
+                <p id="transition-out-info" class="transition-info" hidden></p>
+              </div>
+            </details>
+            <details><summary>Grade</summary>
+              <label>Look <select id="clip-look"></select></label>
+              <label>Look strength <input id="clip-look-intensity" type="number" min="0" max="1" step=".05"></label>
+              <label>Exposure <input id="clip-exposure" type="number" min="-2" max="2" step=".05"></label>
+              <label>Contrast <input id="clip-contrast" type="number" min="-50" max="50"></label>
+              <label>Saturation <input id="clip-saturation" type="number" min="-100" max="100"></label>
+              <label>Temperature <input id="clip-temperature" type="number" min="-50" max="50"></label>
+              <label>Tint <input id="clip-tint" type="number" min="-50" max="50"></label>
+              <div id="grade-wheels" class="grade-wheels" aria-label="Color wheels"></div>
+              <div class="grade-actions">
+                <button id="copy-grade" class="button" type="button">Copy grade</button>
+                <button id="paste-grade" class="button" type="button">Paste grade</button>
+                <button id="reset-grade" class="button" type="button">Reset grade</button>
+              </div>
+              <label class="button import" for="import-lut">Load a .cube look</label><input id="import-lut" type="file" accept=".cube" hidden>
+            </details>
+          </fieldset>
+        </section>
+        </div>
+        <div id="timeline-splitter" class="panel-splitter horizontal" role="separator" tabindex="0" aria-label="Timeline height" aria-controls="timeline-panel" aria-orientation="horizontal" aria-description="Up and down arrows resize. Enter resets the panel size."></div>
+        <section id="timeline-panel" class="panel timeline" aria-labelledby="timeline-title">
+          <h2 id="timeline-title" class="sr-only">Timeline</h2>
+          <div class="timeline-tools">
+            <button class="button icon" id="select-tool" aria-label="Select tool" aria-pressed="true">↖</button><button class="button icon" id="cut-tool" aria-label="Cut tool" aria-pressed="false">✂</button>
+            <button class="button" id="split" type="button" title="Split at the preview playhead">Split</button>
+            <button class="button" id="caption-toggle" type="button" title="Add captions to selected speech">Captions</button>
+            <button class="button" id="remove" type="button">Delete</button><button class="button icon" id="undo" aria-label="Undo">↶</button><button class="button icon" id="redo" aria-label="Redo">↷</button>
+            <div id="range-readout" class="range-readout" aria-label="Marked range" hidden>
+              <button type="button" class="button range-jump" id="jump-in"><span>In</span> <time></time></button>
+              <button type="button" class="button range-jump" id="jump-out"><span>Out</span> <time></time></button>
+              <span id="range-length"></span>
+              <button type="button" class="button icon" id="clear-range" aria-label="Clear in and out">×</button>
+            </div>
+            <span id="runtime" class="timeline-runtime"></span>
+            <span id="draft-label" class="draft-label" hidden>Director preview</span>
+            <button class="button" id="filmstrip" aria-pressed="true">Strip</button><button class="button" id="snap" aria-pressed="true">Snap</button><button class="button" id="sticky" aria-pressed="false">Sticky</button><button class="button" id="skim" aria-pressed="false">Skim</button><button class="button" id="audio-scrub" aria-pressed="false" title="Hear audio while skimming the timeline">Audio</button><button class="button" id="even-levels" type="button" title="Even out selected or all audio clip levels">Even levels</button>
+            <button class="button icon" id="zoom-timeline-out" aria-label="Zoom timeline out">−</button><button class="button icon" id="zoom-timeline-in" aria-label="Zoom timeline in">+</button><button class="button icon" id="fit-timeline" aria-label="Zoom timeline to fit">↔</button>
+          </div>
+          <div class="timeline-view">
+            <div class="timeline-body" id="timeline-body" tabindex="0" role="region" aria-label="Timeline tracks">
+              <div class="timeline-strip">
+                <div class="track-label ruler-label"><button type="button" class="button" id="marks-menu" aria-haspopup="menu" aria-controls="clip-menu" aria-expanded="false">Marks</button></div>
+                <div id="ruler" class="ruler" aria-label="Timeline ruler">
+                  <div id="ruler-ticks" aria-hidden="true"></div>
+                  <div id="ruler-marks"></div>
+                  <i id="ruler-playhead" aria-hidden="true"></i>
+                </div>
+                <div class="timeline-space" id="timeline-above" aria-hidden="true"></div>
+                <div id="timeline-tracks" class="timeline-tracks"></div>
+                <div class="timeline-space" id="timeline-below" aria-hidden="true"></div>
+                <div id="timeline-marks" aria-hidden="true"></div>
+                <div id="skimmer-line" class="skimmer-line" hidden></div>
+                <div id="playhead-line" class="playhead-line"></div>
+              </div>
+            </div>
+            <div id="timeline-rows-bar" class="timeline-bar vertical" role="scrollbar" tabindex="0" aria-controls="timeline-body" aria-label="Timeline track height and scroll" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-description="Drag either grip to resize the tracks. Arrow keys scroll. Plus and minus resize."><div class="timeline-thumb"></div></div>
+            <div id="timeline-time-bar" class="timeline-bar horizontal" role="scrollbar" tabindex="0" aria-controls="timeline-body" aria-label="Timeline time zoom and scroll" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-description="Drag either grip to zoom. Arrow keys scroll. Plus and minus zoom."><div class="timeline-thumb"></div></div>
+          </div>
+
+          <label class="soundtrack">Soundtrack <select id="soundtrack"><option value="">None</option></select></label>
+        </section>
+        <p id="edit-status" role="status"></p>
+      </section>
+      <aside id="director-panel" class="director panel" aria-labelledby="director-title">
+        <div class="director-head">
+          <div class="director-label"><img src="/studio-logo.png" alt=""><div><h1 id="director-title">Director</h1><p id="provider-status">Connect a planner to start.</p></div></div>
+          <div class="director-actions">
+            <button id="auto-edit" type="button" class="button" title="Find the strongest moments and assemble or refine the cut">Auto Edit</button>
+            <button id="provider-button" type="button" class="button" aria-label="Provider settings">⚙</button>
+          </div>
+        </div>
+        <div class="segmented" aria-label="Studio mode"><button class="button" id="director-mode" aria-pressed="true">Director</button><button class="button" id="quick-mode" aria-pressed="false">Quick Clips</button></div>
+        <div class="segmented providers" aria-label="Editing provider"><button class="button provider-tab" data-name="open_ai">ChatGPT</button><button class="button provider-tab" data-name="claude">Claude</button><button class="button provider-tab" data-name="local">Local</button></div>
+        <p id="agent-activity" class="agent-activity" role="status" hidden><strong id="agent-name"></strong><span id="agent-action"></span></p>
+        <div id="conversation" class="conversation" role="log" aria-label="Director conversation"></div>
+        <section id="recover-renders" class="run-plan" aria-label="Interrupted renders" hidden></section>
+        <section id="run-panel" class="run" hidden aria-labelledby="activity-title">
+          <div class="section-head">
+            <h2 id="activity-title">Activity</h2>
+            <span id="run-status" aria-live="polite"></span>
+            <time id="run-elapsed" role="timer" hidden></time>
+            <button id="stop-run" class="button" type="button" hidden>Stop</button>
+          </div>
+          <div id="run-plan" class="run-plan" hidden></div>
+          <ol id="events"></ol>
+        </section>
+        <form id="prompt-form" class="composer">
+          <div class="composer-head">
+            <label for="prompt">What should we make?</label>
+            <div class="composer-tools">
+              <button type="button" class="button" id="prompt-ideas" aria-haspopup="menu" aria-expanded="false">Ideas</button>
+              <button type="button" class="button" id="prompt-history" aria-haspopup="menu" aria-expanded="false">History</button>
+            </div>
+          </div>
+          <textarea id="prompt" rows="3" maxlength="3000" aria-controls="mentions" aria-autocomplete="list" placeholder="Follow a paper boat under a bridge in three connected shots."></textarea>
+          <div id="mentions" class="mentions" role="listbox" aria-label="Director references" hidden></div>
+          <div class="composer-row">
+            <label class="duration">Seconds per shot <input id="duration" type="number" min="1" max="15" step="0.1" placeholder="Auto"></label>
+            <button type="submit" class="button primary" id="send">Send</button>
+          </div>
+          <p id="director-error" role="status" class="error"></p>
+        </form>
+      </aside>
+    </div>
+  </main>
+  <div id="clip-menu" class="clip-menu" role="menu" aria-label="Clip actions" hidden></div>
+  <section id="marker-popover" class="marker-popover panel" role="dialog" aria-label="Timeline marker" hidden>
+    <div class="section-head"><h2>Marker</h2><span id="marker-time"></span><button type="button" id="marker-close" class="button icon" aria-label="Close marker">×</button></div>
+    <form id="marker-form"><label class="sr-only" for="marker-name">Marker name</label><input id="marker-name" placeholder="Name" maxlength="120" autocomplete="off"></form>
+    <div class="marker-actions"><div id="marker-colors" aria-label="Marker colors"></div><button type="button" class="button" id="marker-delete">Delete</button></div>
+    <div id="marker-list" class="marker-list" aria-label="Jump to a marker"></div>
+  </section>
+  <dialog id="title-dialog"><form id="title-form">
+    <h2>Add title</h2><label for="title-text">Text</label><textarea id="title-text" maxlength="3000" required></textarea>
+    <label for="title-length">Seconds</label><input id="title-length" type="number" min=".2" max="360" step=".1" value="5">
+    <div class="dialog-actions"><button class="button close" type="button">Cancel</button><button class="button primary" type="submit">Add title</button></div>
+  </form></dialog>
+  <dialog id="room-dialog" aria-labelledby="room-title">
+    <form id="room-form">
+      <h2 id="room-title">Open project</h2>
+      <label>Project file <input type="file" id="room-file" accept=".room,.cutplay,.zip" required></label>
+      <div id="room-relink" hidden>
+        <p>Select the folder or files referenced by this project. Select their parent folder if several files share a name.</p>
+        <label>Media folder <input type="file" id="room-folder" webkitdirectory multiple></label>
+        <label>Individual files <input type="file" id="room-attachments" multiple></label>
+      </div>
+      <p id="room-status" role="status"></p>
+      <div class="dialog-actions"><button type="button" class="button close">Cancel</button><button class="button primary" id="room-open" type="submit" disabled>Open Project</button></div>
+    </form>
+  </dialog>
+  <dialog id="export-dialog" aria-labelledby="export-title">
+    <form id="export-form">
+      <h2 id="export-title">Export</h2>
+      <div class="export-columns">
+        <div class="export-fields">
+          <label for="export-name">Filename</label><div class="export-filename"><input id="export-name" type="text" maxlength="100" required><span id="export-extension">.mp4</span></div>
+          <label for="export-location">Location</label><select id="export-location"><option value="downloads">Browser downloads</option></select>
+          <label for="export-range">Range</label><select id="export-range"><option value="whole">Whole timeline</option><option value="marked">In to out</option></select>
+          <label for="export-format">Format</label><select id="export-format"><option value="video">MP4 Video</option><option value="audio">WAV Audio</option></select>
+          <label for="export-loudness">Loudness</label><select id="export-loudness"><option value="">As mixed</option><option value="-14">−14 LUFS · Web, YouTube</option><option value="-16">−16 LUFS · Podcasts</option><option value="-23">−23 LUFS · Broadcast</option></select>
+          <div id="export-video-fields" class="export-fields export-video-fields">
+            <label for="export-resolution">Resolution</label><select id="export-resolution"></select>
+            <label for="export-height" data-custom-resolution>Height</label><input id="export-height" data-custom-resolution type="number" min="144" max="4320" value="1080">
+            <label for="export-shape">Shape</label><select id="export-shape"><option value="original">Sequence shape</option><option value="vertical">Vertical 9:16</option><option value="square">Square 1:1</option><option value="portrait">Portrait 4:5</option></select>
+            <label for="export-codec">Codec</label><select id="export-codec"><option value="h264">H.264</option><option value="hevc">HEVC</option></select>
+            <label for="export-quality">Quality</label><select id="export-quality"><option value="high">High</option><option value="web">Web</option></select>
+            <label for="export-audio">Audio</label><label class="export-check"><input id="export-audio" type="checkbox" checked> Include audio</label>
+          </div>
+        </div>
+        <div class="export-preview">
+          <div id="export-preview-stage" class="export-preview-stage">
+            <canvas id="export-preview-picture" aria-label="Export preview"></canvas>
+            <div id="export-preview-wave" class="export-preview-wave" hidden aria-hidden="true">∿</div>
+            <div id="export-preview-crop" class="export-preview-crop" tabindex="0" role="group" aria-label="Export crop window" aria-description="Drag or use the arrow keys to move the crop window" hidden></div>
+          </div>
+          <div class="export-transport">
+            <button type="button" class="button" id="export-preview-play" aria-label="Play export preview">▶</button>
+            <input id="export-preview-scrub" type="range" min="0" max="1" step="1" value="0" aria-label="Scrub export preview">
+            <output id="export-preview-time"></output>
+          </div>
+          <div id="export-summary" class="export-summary" aria-live="polite"></div>
+        </div>
+      </div>
+      <p id="export-replace" role="status" hidden></p>
+      <p id="export-error" class="error" role="status" hidden></p>
+      <div class="dialog-actions"><button class="button close" type="button">Cancel</button><button class="button primary" id="export-submit" type="submit">Export</button></div>
+    </form>
+  </dialog>
+  <dialog id="provider-dialog">
+    <form id="provider-form">
+      <h2>Director settings</h2>
+      <label for="provider">Provider</label>
+      <select id="provider"><option value="open_ai">ChatGPT · OpenAI API</option><option value="claude">Claude · Anthropic API</option><option value="local">Local</option></select>
+      <label for="provider-model">Editing model</label>
+      <select id="provider-model"></select>
+      <label for="provider-effort" id="provider-effort-label">Effort</label>
+      <select id="provider-effort"></select>
+      <label for="renderer">Video model</label>
+      <select id="renderer"><option value="pi_h3">Pi-H3</option><option value="hyperflow">HyperFlow</option></select>
+      <button class="button" id="renderer-check" type="button">Check GPU</button>
+      <p id="renderer-check-status" role="status" hidden></p>
+      <label for="provider-key" id="provider-key-label">API key</label>
+      <input id="provider-key" type="password" required autocomplete="off" spellcheck="false">
+      <p id="provider-key-note">The studio keeps your key in server memory for this session.</p>
+      <button class="button" id="provider-check" type="button">Test connection</button>
+      <p id="provider-check-status" role="status" hidden></p>
+      <p id="provider-error" class="error" role="status"></p>
+      <div class="dialog-actions"><button class="button" type="button" id="disconnect-provider" hidden>Disconnect</button><button class="button close" type="button">Cancel</button><button class="button primary" id="provider-save" type="submit">Connect</button></div>
+    </form>
+  </dialog>
+  <dialog id="project-dialog">
+    <form id="project-form">
+      <h2 id="project-dialog-title">New project</h2>
+      <label for="project-name">Project name</label>
+      <input id="project-name" required maxlength="100" autocomplete="off">
+      <div class="dialog-actions"><button class="button close" type="button">Cancel</button><button class="button primary" type="submit">Save project</button></div>
+    </form>
+  </dialog>
+  <dialog id="save-as-dialog" aria-labelledby="save-as-title">
+    <form id="save-as-form">
+      <h2 id="save-as-title">Save project as</h2>
+      <label for="project-copy-name">Project copy name</label>
+      <input id="project-copy-name" required maxlength="100" autocomplete="off">
+      <p id="project-copy-error" class="error" role="status"></p>
+      <div class="dialog-actions">
+        <button class="button close" id="project-copy-cancel" type="button">Cancel</button>
+        <button class="button primary" id="project-copy-confirm" type="submit">Save Copy</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="recent-projects-dialog" aria-labelledby="recent-projects-title">
+    <div class="shortcut-heading">
+      <h2 id="recent-projects-title">Open Recent</h2>
+      <button class="button close" type="button">Done</button>
+    </div>
+    <div id="recent-project-list" class="recent-project-list"></div>
+    <p id="recent-project-empty" hidden>No recent projects yet.</p>
+    <div class="dialog-actions">
+      <button class="button" id="recent-project-clear" type="button">Clear Menu</button>
+    </div>
+  </dialog>
+  <dialog id="revert-project-dialog" aria-labelledby="revert-project-title" aria-describedby="revert-project-detail">
+    <form id="revert-project-form">
+      <h2 id="revert-project-title">Revert to the saved project?</h2>
+      <p id="revert-project-detail"></p>
+      <p id="revert-project-error" class="error" role="status"></p>
+      <div class="dialog-actions">
+        <button class="button close" type="button" autofocus>Cancel</button>
+        <button class="button primary" id="revert-project-confirm" type="submit">Revert Project</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="editor-settings-dialog" aria-labelledby="editor-settings-title">
+    <div class="shortcut-heading">
+      <h2 id="editor-settings-title">Editor Settings</h2>
+      <button class="button close" type="button">Done</button>
+    </div>
+    <fieldset class="editor-setting-group">
+      <legend>Appearance</legend>
+      <div class="editor-theme-list" id="editor-themes"></div>
+    </fieldset>
+    <fieldset class="editor-setting-group editor-view-settings">
+      <legend>View</legend>
+      <label for="editor-media-layout">Media</label>
+      <select id="editor-media-layout"><option value="thumbnails">Thumbnails</option><option value="list">List</option></select>
+      <label for="editor-time-style">Show time as</label>
+      <select id="editor-time-style"><option value="timecode">Timecode · 00:00:05:15</option><option value="simple">Minutes and seconds · 0:05.50</option></select>
+    </fieldset>
+    <fieldset class="editor-setting-group">
+      <legend>Saving</legend>
+      <label class="director-work-setting">
+        <span>Auto-save projects<small>Save changes across this studio as you edit. With auto-save off, File → Save Project updates the saved version. EditCastle keeps your working copy for recovery.</small></span>
+        <input type="checkbox" id="editor-autosave" checked>
+      </label>
+      <p id="editor-saving-error" class="error" role="status" hidden></p>
+    </fieldset>
+    <fieldset class="editor-setting-group">
+      <legend>Director</legend>
+      <label class="director-work-setting">
+        <span>Enable Director<small>Show Director in the editor toolbar and workspace.</small></span>
+        <input type="checkbox" id="editor-director-enabled" checked>
+      </label>
+      <label class="director-work-setting">
+        <span>Show edits in progress<small>Watch Director change the timeline. Turn this off to see the finished cut as one undoable edit.</small></span>
+        <input type="checkbox" id="editor-director-work" checked>
+      </label>
+    </fieldset>
+    <fieldset class="editor-setting-group attached-agent-settings">
+      <legend>Attached agents</legend>
+      <label class="director-work-setting">
+        <span>Allow attached agents to edit<small>Enabling access creates an agent key if this studio needs one. In-studio Director uses your signed-in session.</small></span>
+        <input type="checkbox" id="attached-enabled" disabled>
+      </label>
+      <div id="attached-connection" hidden>
+        <label for="attached-url">MCP endpoint for this project</label>
+        <input type="text" id="attached-url" readonly spellcheck="false">
+        <div class="attached-agent-actions">
+          <button type="button" class="button" id="attached-copy-setup">Copy setup</button>
+          <button type="button" class="button" id="attached-download-claude">Download Claude extension</button>
+          <button type="button" class="button" id="attached-copy-stdio">Copy stdio config</button>
+          <button type="button" class="button" id="attached-copy-key">Copy agent key</button>
+        </div>
+        <div class="attached-agent-actions">
+          <select id="attached-cli-client" aria-label="Command-line client">
+            <option value="codex">Codex</option>
+            <option value="claude-code">Claude Code</option>
+          </select>
+          <button type="button" class="button" id="attached-cli-connect" hidden>Connect chosen client</button>
+          <button type="button" class="button" id="attached-cli-remove" hidden>Remove chosen client</button>
+          <button type="button" class="button" id="attached-copy-install">Copy install command</button>
+          <button type="button" class="button" id="attached-copy-remove">Copy remove command</button>
+        </div>
+        <p id="attached-cli-status" role="status" hidden></p>
+        <p id="attached-active" hidden></p>
+      </div>
+      <p id="attached-status" role="status" hidden></p>
+    </fieldset>
+  </dialog>
+  <dialog id="shortcut-dialog" aria-labelledby="shortcut-title">
+    <div class="shortcut-heading">
+      <h2 id="shortcut-title">Keyboard Shortcuts</h2>
+      <button class="button close" type="button">Done</button>
+    </div>
+    <label class="sr-only" for="shortcut-search">Search shortcuts</label>
+    <input id="shortcut-search" type="search" placeholder="Search shortcuts" autocomplete="off">
+    <div id="shortcut-list" class="shortcut-list"></div>
+    <div class="shortcut-footer">
+      <p id="shortcut-status" role="status"></p>
+      <button id="shortcut-restore" class="button" type="button">Restore Defaults</button>
+    </div>
+  </dialog>
+  <dialog id="sequence-offer" aria-labelledby="sequence-offer-title" aria-describedby="sequence-offer-detail">
+    <form id="sequence-offer-form">
+      <h2 id="sequence-offer-title">Match the sequence?</h2>
+      <p id="sequence-offer-detail"></p>
+      <p id="sequence-offer-error" class="error" role="status"></p>
+      <div class="dialog-actions">
+        <button class="button" type="submit" value="keep">Keep Current</button>
+        <button class="button primary" type="submit" value="match" autofocus>Match</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="credits-dialog">
+    <h2>Generation credits</h2>
+    <p id="credit-summary"></p>
+    <ul id="credit-history"></ul>
+    <div id="credit-checkout" hidden>
+      <p id="credit-pack"></p>
+      <button id="buy-credits" class="button" type="button">Open Stripe test checkout</button>
+      <p id="checkout-status" role="status"></p>
+    </div>
+    <form id="credit-form">
+      <label for="credit-amount">Add local test credits</label>
+      <input type="number" id="credit-amount" min="1" max="5000" value="60">
+      <button class="button" type="submit">Add</button>
+    </form>
+    <p class="error" id="credit-error" role="status"></p>
+    <button class="button primary close" type="button">Done</button>
+  </dialog>
+  <dialog id="duck-dialog">
+    <form id="duck-form">
+      <h2 id="duck-title">Duck under dialogue</h2>
+      <label class="form-field">Duck under <select id="duck-voice"></select></label>
+      <label class="form-field">Reduction <select id="duck-db"><option value="-6">6 dB</option><option value="-12">12 dB</option><option value="-18">18 dB</option><option value="-24">24 dB</option></select></label>
+      <div class="dialog-actions"><button type="button" class="button" id="duck-cancel">Cancel</button><button class="button primary" type="submit">Apply</button></div>
+    </form>
+  </dialog>
+  <dialog id="folder-dialog">
+    <form id="folder-form">
+      <h2 id="folder-dialog-title">Add media folder</h2>
+      <button id="link-device-folder" class="button" type="button" hidden>Link a folder on this device</button>
+      <button id="upload-folder-button" class="button" type="button">Upload a folder</button>
+      <label>Studio media inbox <select id="inbox-folder"></select></label>
+      <p id="folder-error" class="error" role="status"></p>
+      <div class="dialog-actions"><button type="button" class="button" id="folder-cancel">Cancel</button><button class="button primary" id="folder-link" type="submit">Link folder</button></div>
+    </form>
+  </dialog>
+  <dialog id="folder-menu-dialog">
+    <div class="folder-tools">
+      <h2 id="folder-menu-title">Media folder</h2>
+      <button id="folder-sync" class="button" type="button">Scan for new media</button>
+      <button id="device-folder-sync" class="button" type="button" hidden>Sync this device</button>
+      <button id="device-folder-bind" class="button" type="button" hidden>Choose device folder</button>
+      <button id="folder-reload" class="button" type="button">Reload Folder from Disk</button>
+      <button id="folder-locate" class="button" type="button">Locate inbox folder</button>
+      <button id="folder-remove" class="button" type="button">Remove from project</button>
+      <button id="folder-menu-close" class="button" type="button">Close</button>
+    </div>
+  </dialog>
+  <dialog id="folder-remove-dialog" aria-labelledby="folder-remove-title" aria-describedby="folder-remove-detail">
+    <form id="folder-remove-form">
+      <h2 id="folder-remove-title">Remove media?</h2>
+      <p id="folder-remove-detail"></p>
+      <div class="dialog-actions"><button class="button" id="folder-remove-cancel" type="button" autofocus>Cancel</button><button class="button primary" type="submit">Remove from project</button></div>
+    </form>
+  </dialog>
+  <input id="replace-media" type="file" accept="video/*,audio/*,image/*,.mov,.mp4,.m4a,.mp3,.wav,.mkv" hidden>
+  <dialog id="source-menu-dialog">
+    <div class="folder-tools">
+      <h2 id="source-menu-title">Media source</h2>
+      <button id="source-add" class="button" type="button">Add to Timeline</button>
+      <button id="source-download" class="button" type="button">Download Source</button>
+      <button id="source-match-sequence" class="button" type="button" hidden>Match Sequence to Clip</button>
+      <button id="source-reload" class="button" type="button">Reload from Disk</button>
+      <button id="source-locate-inbox" class="button" type="button" hidden>Locate in Inbox…</button>
+      <button id="source-replace" class="button" type="button">Replace file</button>
+      <button id="source-remove" class="button" type="button">Remove from project</button>
+      <button id="source-menu-close" class="button" type="button">Close</button>
+    </div>
+  </dialog>
+  <dialog id="inbox-source-dialog" aria-labelledby="inbox-source-title">
+    <form id="inbox-source-form">
+      <h2 id="inbox-source-title">Locate source in inbox</h2>
+      <label>Studio inbox file <input id="inbox-source-path" list="inbox-source-options" required autocomplete="off"></label>
+      <datalist id="inbox-source-options"></datalist>
+      <p id="inbox-source-error" class="error" role="status"></p>
+      <div class="dialog-actions"><button type="button" class="button close">Cancel</button><button id="inbox-source-submit" type="submit" class="button primary">Locate</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

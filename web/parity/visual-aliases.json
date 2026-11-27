@@ -1,0 +1,538 @@
+{
+  "portal": [
+    "door",
+    "doorway",
+    "entrance",
+    "gate"
+  ],
+  "conveyance": [
+    "vehicle",
+    "transport"
+  ],
+  "people": [
+    "person",
+    "man",
+    "woman",
+    "guy",
+    "girl",
+    "friends",
+    "crowd"
+  ],
+  "adult": [
+    "person",
+    "man",
+    "woman",
+    "guy",
+    "girl"
+  ],
+  "child": [
+    "kid",
+    "kids",
+    "boy",
+    "girl",
+    "baby"
+  ],
+  "structure": [
+    "building",
+    "architecture"
+  ],
+  "housing": [
+    "house",
+    "home",
+    "building"
+  ],
+  "building": [
+    "house"
+  ],
+  "sky": [
+    "clouds"
+  ],
+  "water body": [
+    "water",
+    "lake",
+    "sea",
+    "ocean"
+  ],
+  "swimming pool": [
+    "pool",
+    "swim"
+  ],
+  "automobile": [
+    "car",
+    "vehicle"
+  ],
+  "vehicle": [
+    "car"
+  ],
+  "aircraft": [
+    "plane",
+    "airplane",
+    "helicopter",
+    "vehicle"
+  ],
+  "rotorcraft": [
+    "helicopter",
+    "vehicle"
+  ],
+  "foliage": [
+    "plants",
+    "leaves",
+    "trees"
+  ],
+  "plant": [
+    "plants",
+    "greenery"
+  ],
+  "food": [
+    "meal",
+    "eating",
+    "dinner",
+    "lunch",
+    "breakfast"
+  ],
+  "drink": [
+    "drinks",
+    "cocktail",
+    "bar"
+  ],
+  "nightclub": [
+    "club",
+    "party"
+  ],
+  "concert": [
+    "gig",
+    "show",
+    "music",
+    "festival"
+  ],
+  "selfie": [
+    "vlog",
+    "talking"
+  ],
+  "sunset sunrise": [
+    "sunset",
+    "sunrise",
+    "golden hour"
+  ],
+  "snow": [
+    "winter"
+  ],
+  "beach": [
+    "sand",
+    "ocean",
+    "sea"
+  ],
+  "dog": [
+    "puppy"
+  ],
+  "cat": [
+    "kitten"
+  ],
+  "rollercoaster": [
+    "ride",
+    "roller",
+    "coaster",
+    "theme park",
+    "amusement"
+  ],
+  "carousel": [
+    "ride",
+    "merry"
+  ],
+  "ferris wheel": [
+    "ride"
+  ],
+  "amusement park": [
+    "ride",
+    "theme",
+    "fair",
+    "funfair",
+    "carnival",
+    "amusement"
+  ],
+  "fairground": [
+    "ride",
+    "fair",
+    "funfair",
+    "carnival"
+  ],
+  "go kart": [
+    "ride",
+    "karting",
+    "racing",
+    "vehicle"
+  ],
+  "trampoline": [
+    "jumping",
+    "bounce"
+  ],
+  "celebration": [
+    "party",
+    "birthday",
+    "celebrate",
+    "festival"
+  ],
+  "cake": [
+    "birthday",
+    "dessert"
+  ],
+  "fireworks": [
+    "celebration",
+    "festival"
+  ],
+  "wedding": [
+    "marriage",
+    "ceremony"
+  ],
+  "bride": [
+    "wedding"
+  ],
+  "graduation": [
+    "ceremony"
+  ],
+  "crowd": [
+    "audience",
+    "festival"
+  ],
+  "dancing": [
+    "dance",
+    "dancer",
+    "party"
+  ],
+  "breakdancing": [
+    "dance",
+    "dancing"
+  ],
+  "ballet dancer": [
+    "dance",
+    "dancing"
+  ],
+  "karaoke": [
+    "singing",
+    "sing"
+  ],
+  "microphone": [
+    "singing",
+    "speech",
+    "podcast"
+  ],
+  "musical instrument": [
+    "music",
+    "band"
+  ],
+  "guitar": [
+    "music",
+    "band"
+  ],
+  "piano": [
+    "music"
+  ],
+  "drum": [
+    "music",
+    "band"
+  ],
+  "sport": [
+    "sports",
+    "game",
+    "match"
+  ],
+  "soccer": [
+    "football",
+    "sports",
+    "game"
+  ],
+  "football": [
+    "sports",
+    "game"
+  ],
+  "basketball": [
+    "sports",
+    "game"
+  ],
+  "tennis": [
+    "sports"
+  ],
+  "golf": [
+    "sports"
+  ],
+  "stadium": [
+    "arena",
+    "game",
+    "match"
+  ],
+  "skateboarding": [
+    "skate",
+    "skating",
+    "skateboard"
+  ],
+  "cycling": [
+    "bike",
+    "biking",
+    "bicycle",
+    "riding"
+  ],
+  "bicycle": [
+    "bike",
+    "vehicle"
+  ],
+  "motorcycle": [
+    "motorbike",
+    "bike",
+    "riding",
+    "vehicle"
+  ],
+  "hiking": [
+    "hike",
+    "trail",
+    "walk"
+  ],
+  "mountain": [
+    "hills"
+  ],
+  "forest": [
+    "woods",
+    "trees"
+  ],
+  "park": [
+    "outdoors"
+  ],
+  "cityscape": [
+    "city",
+    "skyline",
+    "downtown",
+    "urban"
+  ],
+  "skyscraper": [
+    "city",
+    "tower",
+    "downtown"
+  ],
+  "street": [
+    "city",
+    "road"
+  ],
+  "night sky": [
+    "stars"
+  ],
+  "waterfall": [
+    "falls"
+  ],
+  "ocean": [
+    "sea",
+    "water"
+  ],
+  "lake": [
+    "water"
+  ],
+  "river": [
+    "water",
+    "stream"
+  ],
+  "surfing": [
+    "surf",
+    "waves"
+  ],
+  "diving": [
+    "scuba",
+    "underwater"
+  ],
+  "snorkeling": [
+    "snorkel",
+    "underwater"
+  ],
+  "swimming": [
+    "swim"
+  ],
+  "skiing": [
+    "ski",
+    "winter"
+  ],
+  "snowboarding": [
+    "snowboard",
+    "snow",
+    "winter"
+  ],
+  "jetski": [
+    "jet",
+    "water",
+    "vehicle"
+  ],
+  "boat": [
+    "boating",
+    "sailing",
+    "vehicle"
+  ],
+  "sailboat": [
+    "sailing",
+    "boat",
+    "vehicle"
+  ],
+  "yacht": [
+    "boat",
+    "sailing",
+    "vehicle"
+  ],
+  "cruise ship": [
+    "cruise",
+    "boat",
+    "vehicle"
+  ],
+  "kayak": [
+    "kayaking",
+    "paddling",
+    "vehicle"
+  ],
+  "canoe": [
+    "paddling",
+    "boat",
+    "vehicle"
+  ],
+  "camping": [
+    "camp",
+    "tent",
+    "outdoors"
+  ],
+  "tent": [
+    "camping"
+  ],
+  "fire": [
+    "campfire",
+    "bonfire"
+  ],
+  "airplane": [
+    "plane",
+    "flight",
+    "flying",
+    "vehicle"
+  ],
+  "airport": [
+    "flight",
+    "travel"
+  ],
+  "train": [
+    "railway",
+    "travel",
+    "vehicle"
+  ],
+  "restaurant": [
+    "dinner",
+    "eating",
+    "dining"
+  ],
+  "coffee": [
+    "cafe"
+  ],
+  "cocktail": [
+    "drinks",
+    "bar"
+  ],
+  "wine": [
+    "drinks"
+  ],
+  "beer": [
+    "drinks",
+    "bar"
+  ],
+  "museum": [
+    "gallery",
+    "art"
+  ],
+  "painting": [
+    "art"
+  ],
+  "monument": [
+    "landmark",
+    "sightseeing"
+  ],
+  "statue": [
+    "landmark",
+    "sculpture"
+  ],
+  "castle": [
+    "landmark"
+  ],
+  "ruins": [
+    "landmark",
+    "history"
+  ],
+  "zoo": [
+    "animals"
+  ],
+  "aquarium": [
+    "fish",
+    "animals"
+  ],
+  "horse": [
+    "riding"
+  ],
+  "baby": [
+    "newborn",
+    "infant"
+  ],
+  "teen": [
+    "teenager"
+  ],
+  "yoga": [
+    "workout",
+    "exercise",
+    "stretching"
+  ],
+  "screenshot": [
+    "screen",
+    "recording"
+  ],
+  "laptop": [
+    "computer",
+    "screen"
+  ],
+  "playground": [
+    "kids"
+  ],
+  "garden": [
+    "flowers",
+    "plants"
+  ],
+  "car": [
+    "vehicle"
+  ],
+  "laughter": [
+    "laughing",
+    "laugh",
+    "funny"
+  ],
+  "smiles": [
+    "smiling",
+    "smile",
+    "happy"
+  ],
+  "smile": [
+    "smiling",
+    "happy"
+  ],
+  "excitement": [
+    "excited",
+    "happy"
+  ],
+  "fun": [
+    "happy",
+    "funny"
+  ],
+  "bus": [
+    "vehicle"
+  ],
+  "truck": [
+    "vehicle"
+  ],
+  "semi truck": [
+    "vehicle"
+  ],
+  "police car": [
+    "vehicle"
+  ],
+  "formula one car": [
+    "vehicle"
+  ],
+  "helicopter": [
+    "vehicle"
+  ]
+}

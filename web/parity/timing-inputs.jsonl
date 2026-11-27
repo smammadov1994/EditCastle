@@ -1,0 +1,4 @@
+{"name":"shortest-shot","args":["timing","1","3","5","5.15"]}
+{"name":"duration-and-padding","args":["timing","6","7.25","10","12.5","15"]}
+{"name":"rounding-edges","args":["timing","5.020833333333333","5.0208","10.02","10.021","14.99"]}
+{"name":"invalid-duration","args":["timing","0","16","-1","inf","nan","banana"]}
