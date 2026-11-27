@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="page-type" content="software">
   <meta name="site-kind" content="software">
-  <meta name="theme-color" content="#f4f1e8">
+  <meta name="theme-color" content="#0e0d0b">
   <meta name="description" content="Generate connected shots and cut your film in the EditCastle browser studio.">
   <meta property="og:title" content="EditCastle — Browser video studio">
   <meta property="og:description" content="Make connected shots and shape the cut on your timeline.">
@@ -19,98 +19,167 @@
   <script type="module" src="/landing/moments/moments.js"></script>
 </head>
 <body id="top">
-  <!-- Software. Editor collage. Warm paper, near-black and vermilion. Barlow Condensed and Barlow. -->
+  <!-- Software. A studio lot at night: screening wall, feature presentation, film library, call sheet. Warm black, cream and vermilion. Barlow Condensed and Barlow. -->
   <a class="skip-link" href="#main">Skip to content</a>
-  <header class="nav masthead"><div class="wrap masthead-grid">
-    <a class="brand" href="#top" aria-label="EditCastle home"><img src="/studio-logo.png" alt="" width="39" height="39"><span>EditCastle</span></a>
-    <nav aria-label="Main navigation"><a href="#reel">Films</a><a href="#workflow">Workflow</a><a href="#credits">Credits</a></nav>
-    <a class="btn btn--primary button" href="/studio">Open studio <span class="arrow" aria-hidden="true">↗</span></a>
+  <header class="masthead"><div class="wrap masthead-grid">
+    <a class="brand" href="#top" aria-label="EditCastle home"><img src="/studio-logo.png" alt="" width="34" height="34"><span>EditCastle</span></a>
+    <nav aria-label="Main navigation"><a href="#feature">Feature</a><a href="#reel">Films</a><a href="#workflow">Workflow</a><a href="#credits">Credits</a></nav>
+    <a class="button btn--primary" href="/studio">Open studio <span class="arrow" aria-hidden="true">↗</span></a>
   </div></header>
+
   <main id="main">
-    <section class="hero section" aria-labelledby="headline" data-enter>
+    <section class="hero" aria-labelledby="headline" data-enter>
+      <div class="wall" id="wall" aria-hidden="true">
+        <figure class="panel" data-depth="-.5"><video muted loop playsinline preload="none" poster="/wall-turtle.jpg" src="/wall-turtle.mp4"></video><figcaption><b>04</b> Flying Turtle</figcaption></figure>
+        <figure class="panel" data-depth=".7"><video muted loop playsinline preload="none" poster="/wall-cowhide.jpg" src="/wall-cowhide.mp4"></video><figcaption><b>03</b> Cowhide</figcaption></figure>
+        <figure class="panel panel--lead" data-depth="-.25"><video muted loop playsinline preload="none" poster="/wall-safari.jpg" src="/wall-safari.mp4"></video><figcaption><b>01</b> Safari</figcaption></figure>
+        <figure class="panel" data-depth=".9"><video muted loop playsinline preload="none" poster="/wall-pixel-ghost.jpg" src="/wall-pixel-ghost.mp4"></video><figcaption><b>02</b> Pixel Ghost</figcaption></figure>
+        <figure class="panel" data-depth="-.6"><video muted loop playsinline preload="none" poster="/wall-dragon.jpg" src="/wall-dragon.mp4"></video><figcaption><b>05</b> Kite and Dragon</figcaption></figure>
+      </div>
+      <div class="hero-shade" aria-hidden="true"></div>
       <div class="wrap hero-grid">
         <div class="hero-copy">
-          <h1 id="headline"><span>The browser</span> <span>video studio<span class="period">.</span></span></h1>
-          <p>Describe a film in one prompt. Generate shots up to 15 seconds each and cut them on your timeline.</p>
-          <form id="composer" class="composer" action="/studio">
-            <label for="idea">Describe your video</label>
-            <textarea id="idea" maxlength="3000" rows="2" placeholder="A sea turtle lifts out of the surf and flies into the first light."></textarea>
-            <div class="composer-footer">
-              <div class="samples" aria-label="Try a prompt">
-                <button type="button" data-prompt="Make a claymation short about a paper boat finding its way home. Use three connected shots.">Paper Boat</button>
-                <button type="button" data-prompt="Generate three connected shots of a sea turtle rising above the surf, flying past a rocky sea stack, and gliding into the sunrise.">Flying Turtle</button>
-              </div>
-              <button class="btn btn--primary button" type="submit">Open studio <span class="arrow" aria-hidden="true">↗</span></button>
-            </div>
-            <span id="launch-status" class="sr-only" role="status"></span>
-          </form>
+          <p class="slate"><span class="rec" aria-hidden="true"></span>Browser video studio</p>
+          <h1 id="headline"><span>Say the film.</span> <span>Watch it get made<span class="period">.</span></span></h1>
+          <p class="lede">Describe a film in one prompt. Generate shots up to 15 seconds each and cut them on your timeline.</p>
         </div>
-        <div class="hero-visual" data-visual>
-          <div class="stage">
-            <div class="stage-window" aria-hidden="true">
-              <img src="/studio-demo.jpg" alt="" width="1600" height="1000" fetchpriority="high">
+        <form id="composer" class="composer" action="/studio">
+          <label for="idea">Describe your video</label>
+          <textarea id="idea" maxlength="3000" rows="2" placeholder="A sea turtle lifts out of the surf and flies into the first light."></textarea>
+          <div class="composer-footer">
+            <div class="samples" aria-label="Try a prompt">
+              <button type="button" data-prompt="Make a claymation short about a paper boat finding its way home. Use three connected shots.">Paper Boat</button>
+              <button type="button" data-prompt="Generate three connected shots of a sea turtle rising above the surf, flying past a rocky sea stack, and gliding into the sunrise.">Flying Turtle</button>
             </div>
-            <div class="hero-screen" id="hero-screen">
-              <video id="hero-reel" playsinline muted preload="none" poster="/studio-feature.jpg" src="/studio-reel.mp4"
-                aria-label="EditCastle browser timeline and clips from Flying Turtle, Kite and Dragon, and Paper Boat"></video>
-            </div>
-            <button class="btn button hero-control" id="hero-motion" type="button" aria-controls="hero-reel">
-              <span class="play-icon" aria-hidden="true"></span><span id="hero-motion-label">Play studio reel</span>
-            </button>
+            <button class="button btn--primary" type="submit">Open studio <span class="arrow" aria-hidden="true">↗</span></button>
           </div>
+          <span id="launch-status" class="sr-only" role="status"></span>
+        </form>
+      </div>
+    </section>
+
+    <div class="ticker" aria-hidden="true"><div class="ticker-track">
+      <span>Safari</span><i></i><span>Pixel Ghost</span><i></i><span>Cowhide</span><i></i><span>Flying Turtle</span><i></i><span>Kite and Dragon</span><i></i><span>Paper Boat</span><i></i>
+      <span>Safari</span><i></i><span>Pixel Ghost</span><i></i><span>Cowhide</span><i></i><span>Flying Turtle</span><i></i><span>Kite and Dragon</span><i></i><span>Paper Boat</span><i></i>
+    </div></div>
+
+    <section class="feature" id="feature" aria-labelledby="feature-title">
+      <div class="wrap feature-grid">
+        <div class="screen" data-reveal>
+          <span class="corner corner--tl" aria-hidden="true"></span><span class="corner corner--tr" aria-hidden="true"></span><span class="corner corner--bl" aria-hidden="true"></span><span class="corner corner--br" aria-hidden="true"></span>
+          <video id="feature-film" data-auto muted loop playsinline preload="none" poster="/film-safari.jpg" src="/film-safari.mp4" aria-label="Safari"></video>
+          <div class="screen-bar">
+            <button class="screen-toggle" id="feature-toggle" type="button" aria-controls="feature-film" aria-label="Pause Safari"><span class="play-icon" aria-hidden="true"></span></button>
+            <div class="scrub" aria-hidden="true"><div class="scrub-fill" id="feature-progress"></div></div>
+            <output class="timecode" id="feature-time" for="feature-film">0:00 / 0:15</output>
+          </div>
+        </div>
+        <div class="feature-copy" data-reveal>
+          <p class="slate">Feature presentation</p>
+          <h2 id="feature-title">Safari</h2>
+          <dl class="specs">
+            <div><dt>Runtime</dt><dd>0:15</dd></div>
+            <div><dt>Shots</dt><dd>7</dd></div>
+            <div><dt>Frame</dt><dd>3:4 · 24 fps</dd></div>
+          </dl>
+          <p class="feature-note">Seven shots, one cut. Pick a shot to jump to it.</p>
+          <ol class="shots" id="feature-shots" aria-label="Shots in Safari">
+            <li><button type="button" data-at="0" aria-current="true"><img src="/safari-shot-1.jpg" width="240" height="320" alt="A woman in a cream dress walks past an acacia tree"><span>0:00</span></button></li>
+            <li><button type="button" data-at="4"><img src="/safari-shot-2.jpg" width="240" height="320" alt="The hem of her dress moves through the grass"><span>0:04</span></button></li>
+            <li><button type="button" data-at="5.875"><img src="/safari-shot-3.jpg" width="240" height="320" alt="A leather belt with a brass buckle"><span>0:05</span></button></li>
+            <li><button type="button" data-at="7.542"><img src="/safari-shot-4.jpg" width="240" height="320" alt="She strokes a zebra in the grass"><span>0:07</span></button></li>
+            <li><button type="button" data-at="9.333"><img src="/safari-shot-5.jpg" width="240" height="320" alt="She rests her head on the zebra"><span>0:09</span></button></li>
+            <li><button type="button" data-at="11.125"><img src="/safari-shot-6.jpg" width="240" height="320" alt="A white house and two trees reflected in still water"><span>0:11</span></button></li>
+            <li><button type="button" data-at="13.167"><img src="/safari-shot-7.jpg" width="240" height="320" alt="She lifts her face to the sun"><span>0:13</span></button></li>
+          </ol>
         </div>
       </div>
     </section>
 
-    <section class="films section" id="reel" aria-labelledby="reel-title">
+    <section class="films" id="reel" aria-labelledby="reel-title">
       <div class="wrap">
-        <header class="section-header">
+        <header class="section-header" data-reveal>
           <h2 id="reel-title">Films from the studio</h2>
-          <p>Three finished cuts made in EditCastle.</p>
+          <p>Hover to preview. Select a film to watch it with sound.</p>
         </header>
-        <div class="film-grid">
-          <div class="film-player">
-            <video id="player" controls playsinline preload="none" poster="/studio-feature.jpg" src="/reel-flying-turtle.mp4" aria-label="Flying Turtle"></video>
-            <p class="sr-only" id="film-title" aria-live="polite">Flying Turtle</p>
+        <div class="library">
+          <button class="film film--wide" type="button" data-reveal data-film="/film-pixel-ghost.mp4" data-poster="/film-pixel-ghost.jpg" data-title="Pixel Ghost" data-shape="16 / 9">
+            <video muted loop playsinline preload="none" poster="/film-pixel-ghost.jpg" src="/wall-pixel-ghost.mp4"></video>
+            <span class="film-label"><b>Pixel Ghost</b><i>0:30</i></span>
+          </button>
+          <button class="film film--tall" type="button" data-reveal data-film="/film-cowhide.mp4" data-poster="/film-cowhide.jpg" data-title="Cowhide" data-shape="4 / 7">
+            <video muted loop playsinline preload="none" poster="/film-cowhide.jpg" src="/wall-cowhide.mp4"></video>
+            <span class="film-label"><b>Cowhide</b><i>0:10</i></span>
+          </button>
+          <button class="film" type="button" data-reveal data-film="/reel-flying-turtle.mp4" data-poster="/reel-flying-turtle.jpg" data-title="Flying Turtle" data-shape="7 / 4">
+            <video muted loop playsinline preload="none" poster="/reel-flying-turtle.jpg" src="/reel-flying-turtle.mp4"></video>
+            <span class="film-label"><b>Flying Turtle</b><i>0:15</i></span>
+          </button>
+          <button class="film" type="button" data-reveal data-film="/reel-kite-dragon.mp4" data-poster="/reel-kite-dragon.jpg" data-title="Kite and Dragon" data-shape="7 / 4">
+            <video muted loop playsinline preload="none" poster="/reel-kite-dragon.jpg" src="/reel-kite-dragon.mp4"></video>
+            <span class="film-label"><b>Kite and Dragon</b><i>0:13</i></span>
+          </button>
+          <div class="next" data-reveal>
+            <p class="slate">Next on the lot</p>
+            <p class="next-title">Yours<span class="period">.</span></p>
+            <a class="button btn--primary" href="/studio">Open studio <span class="arrow" aria-hidden="true">↗</span></a>
           </div>
-          <div class="reel-list" aria-label="Choose a film">
-            <button class="reel-item" type="button" aria-pressed="true" data-source="/reel-flying-turtle.mp4" data-poster="/studio-feature.jpg" data-title="Flying Turtle"><img src="/studio-shot-flight.jpg" width="400" height="225" alt=""><span>Flying Turtle</span></button>
-            <button class="reel-item" type="button" aria-pressed="false" data-source="/reel-paper-boat.mp4" data-poster="/reel-paper-boat.jpg" data-title="Paper Boat"><img src="/reel-paper-boat.jpg" width="400" height="225" alt=""><span>Paper Boat</span></button>
-            <button class="reel-item" type="button" aria-pressed="false" data-source="/reel-kite-dragon.mp4" data-poster="/reel-kite-dragon.jpg" data-title="Kite and Dragon"><img src="/reel-kite-dragon.jpg" width="400" height="225" alt=""><span>Kite and Dragon</span></button>
-          </div>
+          <button class="film film--wide" type="button" data-reveal data-film="/reel-paper-boat.mp4" data-poster="/reel-paper-boat.jpg" data-title="Paper Boat" data-shape="7 / 4">
+            <video muted loop playsinline preload="none" poster="/reel-paper-boat.jpg" src="/reel-paper-boat.mp4"></video>
+            <span class="film-label"><b>Paper Boat</b><i>0:15</i></span>
+          </button>
         </div>
       </div>
     </section>
 
-    <section class="workflow section" id="workflow" aria-labelledby="workflow-title">
+    <section class="workflow" id="workflow" aria-labelledby="workflow-title">
       <div class="wrap workflow-grid">
-        <header class="workflow-copy">
+        <header class="workflow-copy" data-reveal>
+          <p class="slate">Call sheet</p>
           <h2 id="workflow-title">Connected shots</h2>
-          <p>Continue from a clip’s last visible frame. Director checks the new take before it joins the timeline.</p>
+          <p class="lede">Continue from a clip’s last visible frame. Director checks the new take before it joins the timeline.</p>
           <ol class="steps">
             <li><h3>Write the prompt</h3><p>Describe the action and choose a shot length.</p></li>
             <li><h3>Review the footage</h3><p>Check that the action continues as intended.</p></li>
             <li><h3>Edit the timeline</h3><p>Trim a beat or add a soundtrack.</p></li>
           </ol>
         </header>
-        <div class="contact-sheet" aria-label="Three shots from Flying Turtle">
+        <div class="contact-sheet" data-reveal aria-label="Three shots from Flying Turtle">
           <div class="feature-frame" data-moment="liquid-hover" data-moment-opts='{"strength":0.55}'><img src="/studio-shot-rise.jpg" width="480" height="270" alt="The turtle lifts above the ocean"></div>
-          <img src="/studio-shot-flight.jpg" width="480" height="270" alt="The turtle passes a rocky sea stack">
-          <img src="/studio-shot-sunrise.jpg" width="480" height="270" alt="The turtle glides into the sunrise">
+          <figure><img src="/studio-shot-flight.jpg" width="480" height="270" alt="The turtle passes a rocky sea stack"><figcaption>Shot 2</figcaption></figure>
+          <figure><img src="/studio-shot-sunrise.jpg" width="480" height="270" alt="The turtle glides into the sunrise"><figcaption>Shot 3</figcaption></figure>
+        </div>
+      </div>
+      <div class="wrap">
+        <div class="stage" data-reveal>
+          <img class="stage-still" src="/studio-demo.jpg" alt="The EditCastle studio with a timeline, viewer and Director panel" width="1600" height="1000" loading="lazy">
+          <div class="hero-screen" id="hero-screen">
+            <video id="hero-reel" playsinline muted preload="none" poster="/studio-feature.jpg" src="/studio-reel.mp4"
+              aria-label="EditCastle browser timeline and clips from Flying Turtle, Kite and Dragon, and Paper Boat"></video>
+          </div>
+          <button class="button hero-control" id="hero-motion" type="button" aria-controls="hero-reel">
+            <span class="play-icon" aria-hidden="true"></span><span id="hero-motion-label">Play studio reel</span>
+          </button>
         </div>
       </div>
     </section>
 
-    <section class="credits section" id="credits" aria-labelledby="credits-title">
-      <div class="wrap credit-content">
-        <div><h2 id="credits-title">Render credits</h2><p>One credit per second of rendered footage, rounded up per shot. Failed renders return their credits.</p></div>
-        <a class="btn btn--primary button" href="/studio">Open studio <span class="arrow" aria-hidden="true">↗</span></a>
+    <section class="credits" id="credits" aria-labelledby="credits-title">
+      <div class="wrap credit-content" data-reveal>
+        <div><p class="slate">Render credits</p><h2 id="credits-title">One credit. One second.</h2><p>One credit per second of rendered footage, rounded up per shot. Failed renders return their credits.</p></div>
+        <a class="button btn--primary button--big" href="/studio">Open studio <span class="arrow" aria-hidden="true">↗</span></a>
       </div>
     </section>
   </main>
+
   <footer class="closing"><div class="footer wrap">
-    <a class="brand" href="#top"><img src="/studio-logo.png" alt="" width="32" height="32"><span>EditCastle</span></a>
+    <a class="brand" href="#top"><img src="/studio-logo.png" alt="" width="30" height="30"><span>EditCastle</span></a>
     <a href="#top">Back to top <span class="arrow" aria-hidden="true">↑</span></a>
   </div></footer>
+
+  <dialog class="theater" id="theater" aria-labelledby="theater-title">
+    <div class="theater-top"><p id="theater-title">Film</p><button class="button theater-close" id="theater-close" type="button">Close <span aria-hidden="true">✕</span></button></div>
+    <video id="player" controls playsinline preload="none"></video>
+  </dialog>
 </body>
 </html>

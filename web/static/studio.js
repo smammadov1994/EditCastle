@@ -531,7 +531,7 @@ function renderStudio(nextState) {
   renderActivity();
   observeDirectorDraft(run);
   observeMcp(saved.id);
-  if (queuedReplay) { const steps = queuedReplay; queuedReplay = null; replayDirectorEdits(steps); }
+  if (queuedReplay) { const steps = queuedReplay; queuedReplay = null; performDirectorEdits(steps); }
   if (fitCompletedDirector) { fitCompletedDirector=false; zoomTimeline(null); }
   renderCredits();
   renderSequenceOffer(saved, run?.status === 'running');
@@ -2564,7 +2564,25 @@ function renderActivity() {
   }
   const toggle=byId('toggle-director');
   toggle.dataset.busy=String(active);
-  toggle.setAttribute('aria-label',active ? 'Director, edit in progress' : 'Director');
+  const worker={claude:'Claude',chatgpt:'ChatGPT',local:'Local'}[state.provider] || 'Director';
+  const stoppable=active && !run.applied && !run.stop_requested && stoppingRun!==run.id;
+  toggle.dataset.working=String(stoppable);
+  toggle.dataset.worker=worker;
+  toggle.textContent=stoppable ? worker : 'Director';
+  toggle.setAttribute('aria-label',stoppable ? 'Stop '+worker : active ? 'Director, edit in progress' : 'Director');
+  const liveLine=byId('director-live');
+  const liveEvents=active ? (directorWatch?.run===run.id && directorWatch.events?.length ? directorWatch.events : run.events) : [];
+  const words=String(liveEvents.at(-1) || '');
+  const short=words.length>40 ? words.slice(0,40)+'\u2026' : words;
+  if (liveLine.dataset.words!==short) {
+    liveLine.dataset.words=short;
+    liveLine.classList.remove('shown');
+    clearTimeout(liveLine.timer);
+    liveLine.timer=setTimeout(()=>{
+      liveLine.textContent=short;
+      liveLine.classList.toggle('shown',Boolean(short));
+    },short && liveLine.textContent ? 100 : 0);
+  }
   const runPanel = byId('run-panel');
   runPanel.hidden = !run;
   if (run) {
@@ -2574,6 +2592,10 @@ function renderActivity() {
         else if (showDirectorWork && !previewedRuns.has(run.id)) queuedReplay=run.edits;
       }
       shownRun = null;
+    }
+    if (thinkingShow && (thinkingRun!==run.id || !active || run.stop_requested || stoppingRun===run.id)) {
+      if (queuedReplay && thinkingRun===run.id) thinkingShow.handOver();
+      else endThinking();
     }
     const events = byId('events');
     const live=directorWatch?.run===run.id ? directorWatch.events : null;
@@ -2649,8 +2671,8 @@ let mcpWatch = null;
 let mcpFrame = null;
 
 function agentColor(agent) {
-  if (agent.name==='Claude') return '#f0a175';
-  if (agent.name==='Codex' || agent.name==='ChatGPT') return '#75dbba';
+  if (agent.name==='Claude') return '#d97857';
+  if (agent.name==='Codex' || agent.name==='ChatGPT') return '#0fa380';
   return 'hsl('+[...agent.id].reduce((h,c)=>(31*h+c.charCodeAt(0))%360,0)+' 73% 72%)';
 }
 
@@ -2674,7 +2696,10 @@ function setAgentActivity(agent,label) {
 
 function agentCursor(agent) {
   const cursor=item('span','director-cursor agent-cursor','');
-  cursor.append(item('span','','➤'),item('b','',agent.name));
+  const arrow=item('span','','');
+  if (window.MagicShow) arrow.append(MagicShow.arrow(agentColor(agent)));
+  else arrow.textContent='➤';
+  cursor.append(arrow,item('b','',agent.action ? agent.name+' \u00b7 '+agent.action : agent.name));
   cursor.dataset.agent=agent.id;
   cursor.style.setProperty('--agent-color',agentColor(agent));
   cursor.setAttribute('aria-hidden','true');
@@ -2699,6 +2724,7 @@ function parkAgent(agent,cursor,x,y) {
   y=Math.max(4,Math.min(y,innerHeight-42));
   cursor.style.transform=cursorPosition(x,y);
   cursor.classList.add('agent-parked');
+  cursor.querySelector('b').textContent=agent.name;
   document.body.append(cursor);
   parkedAgents.set(agent.id,{cursor,x,y,timer:setTimeout(()=>releaseAgent(agent.id),agentLinger)});
 }
@@ -2788,7 +2814,7 @@ async function applyMcpEvent(watch,event,current) {
   watch.seen.add(edit);
   if (watch.seen.size>48) watch.seen.delete(watch.seen.values().next().value);
   setAgentActivity(agent,event.label);
-  await replayEdits(frame.edits,watch.controller.signal,agent);
+  await replayEdits(frame.edits,watch.controller.signal,{...agent,action:event.label});
 }
 
 function closeDirectorPreview() {
@@ -2806,6 +2832,7 @@ function observeDirectorDraft(run) {
   closeDirectorPreview();
   const watcher={run:run.id,project:projectId,controller:new AbortController()};
   directorWatch=watcher;
+  beginThinking(run);
   watchDirectorDraft(watcher);
 }
 
@@ -2820,12 +2847,17 @@ async function watchDirectorDraft(watcher) {
       if (packet.activity_events) {
         activity=packet.activity_version;
         watcher.events=packet.activity_events;
+        noteThinking(packet.activity_events);
         renderActivity();
       }
       for (const event of packet.frames) {
         if (signal.aborted || projectId!==editor) return;
         after=event.sequence;
         if (savedProject.revision!==event.base_revision) continue;
+        if (thinkingShow && thinkingRun===run) {
+          sketchDraft(event.edits);
+          continue;
+        }
         directorFrame={...event,run};
         if (!showDirectorWork) continue;
         renderStudio(state);
@@ -6557,6 +6589,8 @@ function updateDirectorPanel() {
 }
 updateDirectorPanel();
 byId('toggle-director').onclick = () => {
+  // While a run works, the button is its Stop control, as in Editroom.
+  if (byId('toggle-director').dataset.working==='true') return byId('stop-run').click();
   directorPanelOpen=!directorPanelOpen;
   updateDirectorPanel();
   storeDisplayPreference('director-open',String(directorPanelOpen));
@@ -7113,6 +7147,496 @@ document.addEventListener('keydown', event => {
   if (action) {event.preventDefault();action();}
 });
 mode(false);
+
+// The Director show. While a run works, the timeline stays as saved and a thinking overlay scans
+// the media and sketches the coming cut. When the run lands, a swarm of cursors performs it.
+let thinkingShow=null;
+let thinkingRun=null;
+let thinkingNoted=0;
+let swarmShow=null;
+const calmMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+const laneNamed=name=>[...timelineBody.querySelectorAll('[data-track]')].find(node=>node.dataset.track===name);
+const clipNode=id=>[...timelineBody.querySelectorAll('[data-clip]')].find(node=>node.dataset.clip===id);
+const tileNode=id=>[...document.querySelectorAll('#media-list [data-asset]')].find(node=>node.dataset.asset===id);
+function within(rect,frame) {
+  return rect.width>0 && rect.right>frame.left+2 && rect.left<frame.right-2 && rect.bottom>frame.top+2 && rect.top<frame.bottom-2;
+}
+function clipped(rect,frame) {
+  const left=Math.max(rect.left,frame.left);
+  const top=Math.max(rect.top,frame.top);
+  return {left,top,width:Math.min(rect.right,frame.right)-left,height:Math.min(rect.bottom,frame.bottom)-top};
+}
+function thinkingTargets(stage) {
+  const list=byId('media-list').getBoundingClientRect();
+  const tiles=[...document.querySelectorAll('#media-list [data-asset]')].map(node=>({key:'asset:'+node.dataset.asset,rect:node.getBoundingClientRect()}))
+    .filter(target=>within(target.rect,list)).map(target=>({...target,rect:clipped(target.rect,list)}));
+  if (stage==='looking') return tiles;
+  const body=timelineBody.getBoundingClientRect();
+  const clips=[...timelineBody.querySelectorAll('[data-clip]')].map(node=>({key:'clip:'+node.dataset.clip,rect:node.getBoundingClientRect()}))
+    .filter(target=>within(target.rect,body)).map(target=>({...target,rect:clipped(target.rect,body)}));
+  return [...clips,...tiles,{key:'viewer',rect:byId('viewer-picture').getBoundingClientRect()}];
+}
+function beginThinking(run) {
+  if (thinkingRun===run.id || !showDirectorWork || calmMotion() || !window.MagicShow) return;
+  endThinking();
+  swarmShow?.skip();
+  thinkingRun=run.id;
+  thinkingNoted=0;
+  const tint={claude:[217,120,87],chatgpt:[15,163,128]}[state.provider] || [242,242,242];
+  thinkingShow=MagicShow.thinking({tint,targets:thinkingTargets,
+    viewer:()=>byId('viewer-picture').getBoundingClientRect(),
+    cutouts:()=>[{rect:byId('director-panel').getBoundingClientRect(),radius:18},
+      {rect:byId('toggle-director').getBoundingClientRect(),radius:99,grow:3}]});
+}
+function endThinking() {
+  thinkingShow?.end();
+  thinkingShow=null;
+  thinkingRun=null;
+}
+function noteThinking(events) {
+  if (!thinkingShow) return;
+  for (const event of events.slice(thinkingNoted)) {
+    const text=String(event);
+    if (/plac|trim|mov|split|grad|mix|transition|title|remov|delet|arrang|mark|laying|applying/i.test(text)) thinkingShow.advance('thinking');
+    else if (/review|analy|check|look|read|study|search|listen|transcri|finding|choosing/i.test(text)) {
+      thinkingShow.advance('analyzing');
+      const named=savedProject.sources.filter(asset=>asset.title && text.includes(asset.title)).sort((a,b)=>b.title.length-a.title.length)[0];
+      if (named) {
+        thinkingShow.focus('asset:'+named.id);
+        for (const clip of savedProject.timeline) if (clip.source===named.id) thinkingShow.focus('clip:'+clip.id);
+      } else thinkingShow.focus('viewer');
+    }
+  }
+  thinkingNoted=events.length;
+}
+function sketchDraft(edits) {
+  thinkingShow.advance('thinking');
+  for (const step of edits) {
+    if (step.after==null || step.track_id || step.ruler_item || !step.after_width) continue;
+    const {track,after,after_width:width}=step;
+    thinkingShow.plan(step.clip,()=>{
+      const lane=laneNamed(track)?.getBoundingClientRect();
+      const body=timelineBody.getBoundingClientRect();
+      if (!lane) return null;
+      const rect={left:lane.left+after*pxPerTick,top:lane.top,width:width*pxPerTick,height:lane.height};
+      rect.right=rect.left+rect.width;
+      rect.bottom=rect.top+rect.height;
+      return within(rect,body) ? clipped(rect,body) : null;
+    });
+  }
+}
+function swarmTasks(steps) {
+  const show=thinkingShow;
+  const places=steps.filter(step=>step.before==null && step.after!=null && !step.ruler_item && !step.track_id).sort((a,b)=>a.after-b.after);
+  const removals=steps.some(step=>step.after==null);
+  const shifts=steps.some(step=>step.before!=null && step.after!=null && (step.before!==step.after || step.before_width!==step.after_width));
+  const overlay=item('div','magic-swarm','');
+  overlay.setAttribute('aria-hidden','true');
+  document.body.append(overlay);
+  const tasks=steps.map(step=>{
+    const lane=()=>(step.ruler_item ? byId('ruler') : step.track_id
+      ? timelineBody.querySelector('[data-track-header="'+step.track_id+'"]') : laneNamed(step.track))?.getBoundingClientRect();
+    const at=(ticks,box)=>box.left+ticks*pxPerTick;
+    const middle=box=>box.top+box.height/2;
+    const node=()=>clipNode(step.clip);
+    const mark=(...names)=>({begin:()=>node()?.classList.add('magic-hot',...names),cool:()=>node()?.classList.remove('magic-hot',...names)});
+    if (step.ruler_item || step.track_id) {
+      return {kind:'change',label:step.label || 'Edit',delay:.6+Math.random()*.4,points:()=>{
+        const box=lane();
+        if (!box) return null;
+        const spot={x:step.track_id ? box.left+Math.min(box.width/2,60) : at(step.after ?? step.before ?? 0,box),y:middle(box)};
+        return {grab:spot,release:spot};
+      }};
+    }
+    if (step.after==null) {
+      let block;
+      return {kind:'remove',label:'Delete',delay:Math.random()*.2,points:()=>{
+        const box=laneNamed(step.from_track || step.track)?.getBoundingClientRect() || timelineBody.getBoundingClientRect();
+        const width=(step.before_width || 0)*pxPerTick;
+        const spot={x:at(step.before || 0,box)+width/2,y:middle(box)};
+        if (!block) {
+          block=item('span','magic-removed',step.label || '');
+          Object.assign(block.style,{left:at(step.before || 0,box)+'px',top:box.top+1+'px',width:Math.max(6,width)+'px',height:box.height-2+'px'});
+          overlay.append(block);
+        }
+        return {grab:spot,release:spot};
+      },finish:()=>block?.remove()};
+    }
+    if (step.before==null) {
+      const asset=source(step.source);
+      const order=places.indexOf(step);
+      const tile=()=>{
+        const found=tileNode(step.source)?.getBoundingClientRect();
+        const list=byId('media-list').getBoundingClientRect();
+        if (found && within(found,list)) return found;
+        return {left:list.left+list.width/2-32,top:found && found.top>list.bottom ? list.bottom-30 : list.top+2,width:64,height:36};
+      };
+      const start=tile();
+      return {kind:'place',label:asset && asset.audio && !asset.video ? 'Music' : 'Place',
+        delay:(removals || shifts ? .5 : 0)+order*.09+Math.random()*.25,
+        carry:{from:{width:start.width,height:start.height},
+          to:{width:Math.min(Math.max(8,step.after_width*pxPerTick),260),height:(laneNamed(step.track)?.getBoundingClientRect().height || 40)-2},
+          image:asset?.video ? sourceUrl('thumb',asset.id,asset.version) : ''},
+        points:()=>{
+          const box=lane();
+          if (!box) return null;
+          const from=tile();
+          return {grab:{x:from.left+from.width/2,y:from.top+from.height/2},
+            release:{x:at(step.after,box)+Math.min(step.after_width*pxPerTick,260)*.3,y:middle(box)}};
+        },
+        begin:()=>{},
+        finish:()=>{
+          node()?.classList.remove('magic-waiting');
+          node()?.classList.add('magic-hot');
+          show?.landed(step.clip);
+        },
+        cool:()=>node()?.classList.remove('magic-hot')};
+    }
+    const [before,after,oldWidth,newWidth]=[step.before,step.after,step.before_width ?? step.after_width,step.after_width];
+    const moved=before!==after || (step.from_track && step.from_track!==step.track);
+    const sized=oldWidth!==newWidth;
+    if (!moved && !sized) {
+      return {plain:true,kind:'change',label:'Edit',delay:(places.length ? 1 : .3)+Math.random()*.5,...mark(),points:()=>{
+        const box=lane();
+        if (!box) return null;
+        const spot={x:at(after,box)+Math.min(newWidth*pxPerTick/2,80),y:middle(box)};
+        return {grab:spot,release:spot};
+      }};
+    }
+    const head=sized && before!==after && before+oldWidth===after+newWidth;
+    const tail=sized && before===after;
+    const rise=()=>{
+      const from=laneNamed(step.from_track || step.track)?.getBoundingClientRect();
+      const to=lane();
+      return from && to ? from.top-to.top : 0;
+    };
+    const pose=u=>{
+      const clip=node();
+      if (!clip) return;
+      if (u>=1) {
+        clip.style.transform='';
+        clip.style.width=clip.dataset.magicWidth ?? clip.style.width;
+        delete clip.dataset.magicWidth;
+        return;
+      }
+      clip.dataset.magicWidth ??= clip.style.width;
+      clip.style.transform='translate('+(before-after)*pxPerTick*(1-u)+'px,'+(u<.5 ? rise() : 0)+'px)';
+      if (sized) clip.style.width=Math.max(2,(oldWidth+(newWidth-oldWidth)*u)*pxPerTick)+'px';
+    };
+    return {kind:head || tail ? 'trim' : 'move',label:head || tail || !moved ? 'Trim' : 'Move',delay:.15+Math.random()*.4,
+      ...mark(head ? 'magic-trim-head' : tail ? 'magic-trim-tail' : 'magic-moving'),apply:pose,finish:()=>pose(1),
+      points:()=>{
+        const box=lane();
+        if (!box) return null;
+        const y=middle(box);
+        if (tail) return {grab:{x:at(before+oldWidth,box),y},release:{x:at(after+newWidth,box),y}};
+        if (head) return {grab:{x:at(before,box),y},release:{x:at(after,box),y}};
+        return {grab:{x:at(before,box)+oldWidth*pxPerTick/2,y:y+rise()},release:{x:at(after,box)+newWidth*pxPerTick/2,y}};
+      }};
+  });
+  const cards=gradeCards(overlay,steps.filter(step=>step.detail?.grade && step.after!=null).length);
+  const extra=steps.flatMap((step,index)=>detailTasks(step,tasks[index],overlay,cards));
+  const detailed=new Set(extra.map(task=>task.clip));
+  return {tasks:[...tasks.filter((task,index)=>!(task.plain && detailed.has(steps[index].clip))),...extra],overlay};
+}
+// The Grade cards the swarm works on, stacked over the inspector.
+function gradeCards(overlay,count) {
+  const panel=()=>{
+    const box=document.querySelector('.panel.inspector').getBoundingClientRect();
+    if (box.width>=160) return box;
+    // No inspector on screen: the cards take the right edge of the viewer instead.
+    const viewer=byId('viewer-panel').getBoundingClientRect();
+    return {left:viewer.right-272,top:viewer.top,width:272,height:viewer.height};
+  };
+  let made=0;
+  let open=0;
+  let backdrop;
+  const frame=slot=>{
+    const box=panel();
+    const slots=Math.max(2,Math.floor((box.height-60)/102));
+    return {left:box.left+12,top:box.top+52+(slot%slots)*102,width:box.width-24,height:96};
+  };
+  return {frame,next:()=>made++,
+    show(card) {
+      if (!backdrop) {
+        const box=panel();
+        backdrop=item('div','magic-grade-back','');
+        backdrop.append(item('strong','','Grade'),item('span','',count+(count===1 ? ' clip' : ' clips')));
+        Object.assign(backdrop.style,{left:box.left+'px',top:box.top+'px',width:box.width+'px',height:box.height+'px'});
+        overlay.prepend(backdrop);
+        requestAnimationFrame(()=>backdrop.classList.add('shown'));
+      }
+      open++;
+      overlay.append(card);
+      requestAnimationFrame(()=>card.classList.add('shown'));
+    },
+    hide(card,toward) {
+      const box=card.getBoundingClientRect();
+      card.style.transform='translate('+(toward.x-box.left-box.width/2)+'px,'+(toward.y-box.top-box.height/2)+'px) scale(.3)';
+      card.classList.remove('shown');
+      setTimeout(()=>card.remove(),180);
+      if (--open<=0 && made>=count) setTimeout(()=>backdrop?.classList.remove('shown'),300);
+    }};
+}
+function detailTasks(step,main,overlay,cards) {
+  const detail=step.detail;
+  if (!detail || step.after==null) return [];
+  const after=main.plain ? null : main;
+  const wait=main.plain ? .3+Math.random()*.5 : 0;
+  const box=()=>{
+    const found=clipNode(step.clip)?.getBoundingClientRect();
+    if (found?.width) return found;
+    const lane=laneNamed(step.track)?.getBoundingClientRect();
+    return lane && {left:lane.left+step.after*pxPerTick,top:lane.top,width:step.after_width*pxPerTick,height:lane.height,
+      right:lane.left+(step.after+step.after_width)*pxPerTick,bottom:lane.bottom};
+  };
+  const hot={begin:()=>clipNode(step.clip)?.classList.add('magic-hot'),cool:()=>clipNode(step.clip)?.classList.remove('magic-hot')};
+  const base={clip:step.clip,after,...hot};
+  // Fade lengths are stored in timeline ticks.
+  const frames=count=>count*pxPerTick;
+  const tasks=[];
+  if (detail.typed) {
+    const words=detail.typed;
+    const face=()=>clipNode(step.clip)?.querySelector('strong');
+    tasks.push({...base,kind:'type',seconds:.12+.045*words.length,delay:wait+.05,
+      label:raw=>words.slice(0,Math.ceil(raw*words.length))+'|',
+      progress:raw=>{ const node=face(); if (node) node.textContent=raw>=1 ? words : words.slice(0,Math.ceil(raw*words.length)) || ' '; },
+      points:()=>{
+        const clip=box();
+        if (!clip) return null;
+        const spot={x:clip.left+Math.min(clip.width/2,60),y:clip.top+clip.height/2};
+        return {grab:spot,release:spot};
+      }});
+  }
+  if (detail.fade_in) {
+    tasks.push({...base,kind:'fade',label:'Fade in',delay:wait+.1,points:()=>{
+      const clip=box();
+      if (!clip) return null;
+      const y=clip.top+8;
+      return {grab:{x:clip.left+6+frames(detail.fade_in[0]),y},release:{x:Math.max(clip.left+6,clip.left+frames(detail.fade_in[1])),y}};
+    }});
+  }
+  if (detail.fade_out) {
+    tasks.push({...base,kind:'fade',label:'Fade out',delay:wait+.2,points:()=>{
+      const clip=box();
+      if (!clip) return null;
+      const y=clip.top+8;
+      return {grab:{x:clip.right-6-frames(detail.fade_out[0]),y},release:{x:Math.min(clip.right-6,clip.right-frames(detail.fade_out[1])),y}};
+    }});
+  }
+  if (detail.gain) {
+    const [from,to]=detail.gain;
+    const level=(clip,db)=>clip.top+clip.height*(.5-Math.max(-24,Math.min(24,db))/60);
+    tasks.push({...base,kind:'gain',label:(to<0 ? '\u2212' : '+')+Math.abs(Math.round(to*10)/10)+' dB',delay:wait+.4,points:()=>{
+      const clip=box();
+      if (!clip) return null;
+      const x=clip.left+Math.min(clip.width*.5,70);
+      return {grab:{x,y:level(clip,from)},release:{x,y:level(clip,to)}};
+    }});
+  }
+  if (detail.transition) {
+    const kind=detail.transition[1];
+    const edge=()=>{
+      const clip=box();
+      return clip && {x:clip.left,y:clip.top+clip.height/2};
+    };
+    if (!kind) {
+      tasks.push({...base,kind:'change',label:'No transition',delay:wait+.1,points:()=>{
+        const spot=edge();
+        return spot && {grab:spot,release:spot};
+      }});
+    } else {
+      const rows=['Dissolve','Dip to Black','Wipe'];
+      const row=/wipe/i.test(kind) ? 2 : /dip|black|fade/i.test(kind) ? 1 : 0;
+      let menu;
+      tasks.push({...base,kind:'transition',label:rows[row],delay:wait+.1,steady:true,
+        points:()=>{
+          const spot=edge();
+          return spot && {grab:spot,release:{x:spot.x+62,y:spot.y+20+21*row}};
+        },
+        position:(raw,grab,release)=>{
+          const u=Math.max(0,Math.min(1,(raw-.3)/.45));
+          const ease=u<.5 ? 4*u*u*u : 1-Math.pow(-2*u+2,3)/2;
+          return {x:grab.x+(release.x-grab.x)*ease,y:grab.y+(release.y-grab.y)*ease};
+        },
+        progress:raw=>{
+          if (!menu && raw<.9) {
+            const spot=edge();
+            if (!spot) return;
+            menu=item('div','magic-menu','');
+            rows.forEach(name=>menu.append(item('span','',name)));
+            Object.assign(menu.style,{left:spot.x+4+'px',top:spot.y+6+'px'});
+            overlay.append(menu);
+          }
+          if (!menu) return;
+          const opening=Math.min(1,raw/.15);
+          menu.style.opacity=opening;
+          menu.style.transform='scale('+(.85+.15*opening)+')';
+          menu.children[row].classList.toggle('picked',raw>.6);
+          if (raw>=.9) { menu.remove(); menu=null; }
+        },
+        finish:()=>menu?.remove()});
+    }
+  }
+  if (detail.grade) {
+    const [old,now]=detail.grade.map(grade=>grade || {});
+    const slot=cards.next();
+    const fields=[['exposure','Exposure',2,2],['contrast','Contrast',50,0],['saturation','Saturation',100,0]];
+    const signed=(value,digits)=>(value<0 ? '\u2212' : '+')+Math.abs(value).toFixed(digits);
+    let card;
+    const build=()=>{
+      if (card) return;
+      const frame=cards.frame(slot);
+      card=item('div','magic-grade-card','');
+      Object.assign(card.style,{left:frame.left+'px',top:frame.top+'px',width:frame.width+'px'});
+      const title=item('header','','');
+      title.append(item('b','','GRADE'),item('span','',step.label || clipNode(step.clip)?.querySelector('strong')?.textContent || 'Clip'));
+      const look=item('p','magic-look','');
+      look.append(item('span','','Look'),item('i','',old.look || 'None'));
+      card.append(title,look);
+      for (const [key,name,range,digits] of fields) {
+        const line=item('p','magic-slider','');
+        line.dataset.key=key;
+        line.append(item('span','',name),item('u','',''),item('em','',signed(old[key] || 0,digits)));
+        line.style.setProperty('--at',(old[key] || 0)/range);
+        card.append(line);
+      }
+      cards.show(card);
+    };
+    const chain=[];
+    const lookName=look=>String(look).split('/').at(-1).replace(/^lut:/,'').replace(/\.cube$/i,'');
+    if ((old.look || '')!==(now.look || '')) {
+      chain.push({kind:'look',label:now.look ? lookName(now.look) : 'No look',
+        points:()=>{
+          const frame=cards.frame(slot);
+          const spot={x:frame.left+119,y:frame.top+33};
+          return {grab:spot,release:spot};
+        },
+        begin:()=>card?.querySelector('.magic-look i').classList.add('picking'),
+        finish:()=>{
+          const chip=card?.querySelector('.magic-look i');
+          if (!chip) return;
+          chip.classList.remove('picking');
+          chip.textContent=now.look ? lookName(now.look) : 'None';
+        }});
+    }
+    fields.forEach(([key,name,range,digits],index)=>{
+      const [from,to]=[old[key] || 0,now[key] || 0];
+      if (from===to) return;
+      const knob=(frame,value)=>frame.left+84+(frame.width-130)*(.5+Math.max(-1,Math.min(1,value/range))/2);
+      chain.push({kind:'grade',label:name,
+        points:()=>{
+          const frame=cards.frame(slot);
+          const y=frame.top+54+15*index+6;
+          return {grab:{x:knob(frame,from),y},release:{x:knob(frame,to),y}};
+        },
+        apply:u=>{
+          const line=card?.querySelector('[data-key='+key+']');
+          if (!line) return;
+          const value=from+(to-from)*u;
+          line.style.setProperty('--at',value/range);
+          line.querySelector('em').textContent=signed(value,digits);
+        }});
+    });
+    if (!chain.length) chain.push({kind:'change',label:'Colour',points:()=>{
+      const frame=cards.frame(slot);
+      const spot={x:frame.left+frame.width/2,y:frame.top+48};
+      return {grab:spot,release:spot};
+    }});
+    chain.forEach((task,index)=>{
+      Object.assign(task,{clip:step.clip,steady:true,after:index ? chain[index-1] : after,same:index>0,
+        delay:index ? .03 : wait+.1+Math.random()*.35,approach:index ? undefined : build});
+      if (!index) { const begin=task.begin; task.begin=()=>{ build(); begin?.(); }; }
+    });
+    const last=chain.at(-1);
+    last.cool=()=>{
+      const clip=box();
+      if (card) cards.hide(card,clip ? {x:clip.left+clip.width/2,y:clip.top+clip.height/2} : {x:innerWidth/2,y:innerHeight/2});
+    };
+    tasks.push(...chain);
+  }
+  return tasks;
+}
+// While the swarm works, the viewer flashes the clips of the cut, as Editroom does.
+function flashViewer(steps) {
+  const clips=project.timeline.filter(clip=>source(clip.source)?.video).sort((a,b)=>a.start-b.start);
+  if (!clips.length) return ()=>{};
+  const stage=byId('viewer-picture');
+  const flash=item('div','magic-flash','');
+  const picture=new Image();
+  const pill=item('span','','');
+  flash.append(picture,pill);
+  flash.setAttribute('aria-hidden','true');
+  flash.hidden=true;
+  stage.append(flash);
+  let turn=0;
+  const show=()=>{
+    const clip=clips[turn++%clips.length];
+    const asset=source(clip.source);
+    const next=new Image();
+    next.onload=()=>{
+      picture.src=next.src;
+      pill.textContent=asset.title+'  '+time(clip.start+.6*length(clip));
+      flash.hidden=false;
+    };
+    next.src=sourceUrl('thumb',asset.id,asset.version);
+  };
+  const first=setTimeout(show,1000);
+  const timer=setInterval(show,1300);
+  return ()=>{
+    clearTimeout(first);
+    clearInterval(timer);
+    flash.remove();
+  };
+}
+async function performDirectorEdits(steps) {
+  const show=thinkingShow;
+  thinkingShow=null;
+  thinkingRun=null;
+  if (!showDirectorWork || calmMotion() || !window.MagicShow) {
+    show?.end();
+    return replayDirectorEdits(steps);
+  }
+  show?.handOver();
+  swarmShow?.skip();
+  const editor=projectId;
+  const revision=project.revision;
+  zoomTimeline(null);
+  timelineBody.scrollTop=0;
+  // Clips the swarm will place wait out of sight; clips it will move or trim start where they were.
+  const waiting=steps.filter(step=>step.before==null && step.after!=null && !step.ruler_item && !step.track_id);
+  for (const step of waiting) clipNode(step.clip)?.classList.add('magic-waiting');
+  const {tasks,overlay}=swarmTasks(steps);
+  for (const task of tasks) if (task.kind==='trim' || task.kind==='move') task.apply(0);
+  for (const task of tasks) if (task.kind==='type') task.progress(0);
+  const clear=()=>{
+    overlay.remove();
+    for (const node of timelineBody.querySelectorAll('.magic-waiting,.magic-hot,[data-magic-width]')) {
+      node.classList.remove('magic-waiting','magic-hot','magic-trim-head','magic-trim-tail','magic-moving');
+      node.style.transform='';
+    }
+    show?.release();
+  };
+  // Hold on the sketch of the cut before the cursors leave the button.
+  await new Promise(resolve=>setTimeout(resolve,show ? Math.min(2000,Math.max(800,show.drawnIn*1000+350)) : 0));
+  if (projectId!==editor || project.revision!==revision) return clear();
+  const button=byId('toggle-director').getBoundingClientRect();
+  const running=MagicShow.swarm({tasks,origin:()=>({x:button.left+button.width/2,y:button.top+button.height/2})});
+  swarmShow=running;
+  const stopFlashes=flashViewer(steps);
+  const hurry=event=>{
+    if (event.type==='keydown' && ['Shift','Meta','Control','Alt'].includes(event.key)) return;
+    running.skip();
+  };
+  addEventListener('pointerdown',hurry,true);
+  addEventListener('keydown',hurry,true);
+  await running.done;
+  removeEventListener('pointerdown',hurry,true);
+  removeEventListener('keydown',hurry,true);
+  if (swarmShow===running) swarmShow=null;
+  stopFlashes();
+  clear();
+}
 
 async function replayDirectorEdits(steps,signal) {
   if (!showDirectorWork || signal?.aborted) return;

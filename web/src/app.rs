@@ -498,6 +498,10 @@ fn workspace_routes(app: Shared) -> Router {
             get(|| async { js(include_str!("../static/shortcuts.js")) }),
         )
         .route(
+            "/magic-show.js",
+            get(|| async { js(include_str!("../static/magic-show.js")) }),
+        )
+        .route(
             "/studio.js",
             get(|| async { js(include_str!("../static/studio.js")) }),
         )
@@ -5253,6 +5257,38 @@ impl EditDraft<'_> {
     }
 }
 
+/// The changes inside one clip that the browser performs as separate gestures.
+fn edit_detail(old: Option<&Clip>, new: &Clip) -> Option<serde_json::Value> {
+    let mut detail = serde_json::Map::new();
+    let fx = &new.effects;
+    let was = old.map(|clip| &clip.effects);
+    let gain = was.map_or(0.0, |fx| fx.gain_db);
+    if gain != fx.gain_db {
+        detail.insert("gain".into(), json!([gain, fx.gain_db]));
+    }
+    let fade_in = was.map_or(0, |fx| fx.fade_in_frames);
+    if fade_in != fx.fade_in_frames {
+        detail.insert("fade_in".into(), json!([fade_in, fx.fade_in_frames]));
+    }
+    let fade_out = was.map_or(0, |fx| fx.fade_out_frames);
+    if fade_out != fx.fade_out_frames {
+        detail.insert("fade_out".into(), json!([fade_out, fx.fade_out_frames]));
+    }
+    let transition = was.and_then(|fx| fx.transition.clone());
+    if transition != fx.transition {
+        detail.insert("transition".into(), json!([transition, fx.transition]));
+    }
+    let grade = was.map_or(serde_json::Value::Null, |fx| fx.grade.clone());
+    if grade != fx.grade {
+        detail.insert("grade".into(), json!([grade, fx.grade]));
+    }
+    let title = was.map_or("", |fx| fx.title.as_str());
+    if title != fx.title && !fx.title.is_empty() {
+        detail.insert("typed".into(), json!(fx.title));
+    }
+    (!detail.is_empty()).then(|| serde_json::Value::Object(detail))
+}
+
 fn visible_edits(
     before: &Project,
     after: &Project,
@@ -5286,6 +5322,7 @@ fn visible_edits(
                 before_width: None,
                 after_width: None,
                 ruler_item: None,
+                detail: None,
                 track_id: Some(track.id),
                 label: Some(match action {
                     "add_track" => format!("Added {}", track.name),
@@ -5340,6 +5377,7 @@ fn visible_edits(
                 label: None,
                 before_width: first.map(Clip::duration),
                 after_width: Some(clip.duration()),
+                detail: edit_detail(first, clip),
             });
         }
     }
@@ -5359,6 +5397,7 @@ fn visible_edits(
                 label: Some(clip.name(before).to_owned()),
                 before_width: Some(clip.duration()),
                 after_width: None,
+                detail: None,
             });
         }
     }
@@ -5376,6 +5415,7 @@ fn visible_edits(
         ruler_item: Some(kind.into()),
         track_id: None,
         label: Some(label),
+        detail: None,
     };
     for marker in &after.sequence.markers {
         let old = before.sequence.markers.iter().find(|m| m.id == marker.id);

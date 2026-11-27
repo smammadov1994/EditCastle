@@ -1283,6 +1283,10 @@ pub struct VisibleEdit {
     pub track_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// What changed inside the clip, as [before, after] pairs, so the browser can perform each
+    /// change as its own gesture: gain, fade_in, fade_out, grade, transition, typed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
